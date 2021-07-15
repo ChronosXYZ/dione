@@ -256,10 +256,13 @@ func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {
 	if err != nil {
 		if errors.Is(err, ErrNoAcceptedBlocks) {
 			logrus.WithFields(logrus.Fields{
-				"round": pcm.state.blockHeight,
+				"height": pcm.state.blockHeight,
 			}).Infof("No accepted blocks in the current consensus round")
 		} else {
-			logrus.Errorf("Failed to select the block in consensus round %d: %s", pcm.state.blockHeight, err.Error())
+			logrus.WithFields(logrus.Fields{
+				"height": pcm.state.blockHeight,
+				"err":    err.Error(),
+			}).Errorf("Failed to select the block in the current consensus round")
 			return
 		}
 	}
@@ -343,7 +346,7 @@ func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {
 
 	// if we are round winner
 	if minedBlock != nil {
-		logrus.WithField("round", pcm.state.blockHeight).Infof("We are elected in consensus round")
+		logrus.WithField("height", pcm.state.blockHeight).Infof("We have been elected in the current consensus round")
 		err = pcm.propose(minedBlock)
 		if err != nil {
 			logrus.Errorf("Failed to propose the block: %s", err.Error())
