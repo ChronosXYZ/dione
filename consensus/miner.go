@@ -90,7 +90,7 @@ func (m *Miner) GetStakeInfo(miner common.Address) (*big.Int, *big.Int, error) {
 }
 
 func (m *Miner) MineBlock(randomness []byte, randomnessRound uint64, lastBlockHeader *types2.BlockHeader) (*types2.Block, error) {
-	logrus.Debug("attempting to mine the block at epoch: ", lastBlockHeader.Height+1)
+	logrus.WithField("height", lastBlockHeader.Height+1).Debug("Trying to mine new block...")
 
 	if err := m.UpdateCurrentStakeInfo(); err != nil {
 		return nil, fmt.Errorf("failed to update miner stake: %w", err)

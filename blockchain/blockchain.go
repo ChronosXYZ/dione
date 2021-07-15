@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 
+	"github.com/asaskevich/EventBus"
+
 	"github.com/Secured-Finance/dione/blockchain/utils"
 
 	types2 "github.com/Secured-Finance/dione/blockchain/types"
@@ -31,10 +33,13 @@ type BlockChain struct {
 	db            lmdb.DBI
 	metadataIndex *utils.Index
 	heightIndex   *utils.Index
+	bus           EventBus.Bus
 }
 
-func NewBlockChain(path string) (*BlockChain, error) {
-	chain := &BlockChain{}
+func NewBlockChain(path string, bus EventBus.Bus) (*BlockChain, error) {
+	chain := &BlockChain{
+		bus: bus,
+	}
 
 	// configure lmdb env
 	env, err := lmdb.NewEnv()
@@ -84,7 +89,11 @@ func NewBlockChain(path string) (*BlockChain, error) {
 }
 
 func (bp *BlockChain) setLatestBlockHeight(height uint64) error {
-	return bp.metadataIndex.PutUint64([]byte(LatestBlockHeightKey), height)
+	err := bp.metadataIndex.PutUint64([]byte(LatestBlockHeightKey), height)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (bp *BlockChain) GetLatestBlockHeight() (uint64, error) {
@@ -134,17 +143,17 @@ func (bp *BlockChain) StoreBlock(block *types2.Block) error {
 		return err
 	}
 
-	if err == ErrLatestHeightNil {
+	if err == ErrLatestHeightNil || block.Header.Height > height {
 		if err = bp.setLatestBlockHeight(block.Header.Height); err != nil {
 			return err
 		}
-	} else {
-		if block.Header.Height > height {
-			if err = bp.setLatestBlockHeight(block.Header.Height); err != nil {
-				return err
-			}
+	} else if block.Header.Height > height {
+		if err = bp.setLatestBlockHeight(block.Header.Height); err != nil {
+			return err
 		}
+		bp.bus.Publish("blockchain:latestBlockHeightUpdated", block)
 	}
+	bp.bus.Publish("blockchain:blockCommitted", block)
 	return nil
 }
 

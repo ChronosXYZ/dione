@@ -3,6 +3,9 @@ package pool
 import (
 	"bytes"
 	"encoding/hex"
+	"time"
+
+	"github.com/asaskevich/EventBus"
 
 	"github.com/sirupsen/logrus"
 
@@ -15,20 +18,27 @@ type BlockPool struct {
 	mempool        *Mempool
 	knownBlocks    cache.Cache
 	acceptedBlocks cache.Cache
+	bus            EventBus.Bus
 }
 
-func NewBlockPool(mp *Mempool) (*BlockPool, error) {
+func NewBlockPool(mp *Mempool, bus EventBus.Bus) (*BlockPool, error) {
 	bp := &BlockPool{
 		acceptedBlocks: cache.NewInMemoryCache(), // here we need to use separate cache
 		knownBlocks:    cache.NewInMemoryCache(),
 		mempool:        mp,
+		bus:            bus,
 	}
 
 	return bp, nil
 }
 
 func (bp *BlockPool) AddBlock(block *types.Block) error {
-	return bp.knownBlocks.Store(hex.EncodeToString(block.Header.Hash), block)
+	err := bp.knownBlocks.StoreWithTTL(hex.EncodeToString(block.Header.Hash), block, 10*time.Minute)
+	if err != nil {
+		return err
+	}
+	bp.bus.Publish("blockpool:knownBlockAdded", block)
+	return nil
 }
 
 func (bp *BlockPool) GetBlock(blockhash []byte) (*types.Block, error) {
@@ -42,10 +52,16 @@ func (bp *BlockPool) PruneBlocks() {
 	for k := range bp.knownBlocks.Items() {
 		bp.knownBlocks.Delete(k)
 	}
+	bp.bus.Publish("blockpool:pruned")
 }
 
 func (bp *BlockPool) AddAcceptedBlock(block *types.Block) error {
-	return bp.acceptedBlocks.Store(hex.EncodeToString(block.Header.Hash), block)
+	err := bp.acceptedBlocks.Store(hex.EncodeToString(block.Header.Hash), block)
+	if err != nil {
+		return err
+	}
+	bp.bus.Publish("blockpool:acceptedBlockAdded", block)
+	return nil
 }
 
 func (bp *BlockPool) GetAllAcceptedBlocks() []*types.Block {

@@ -36,7 +36,6 @@ type BeaconNetwork struct {
 type BeaconAPI interface {
 	Entry(context.Context, uint64) (types.BeaconEntry, error)
 	VerifyEntry(types.BeaconEntry, types.BeaconEntry) error
-	NewEntries() <-chan types.BeaconEntry
 	LatestBeaconRound() uint64
 }
 

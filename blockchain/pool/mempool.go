@@ -6,6 +6,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/asaskevich/EventBus"
+
 	"github.com/sirupsen/logrus"
 
 	types2 "github.com/Secured-Finance/dione/blockchain/types"
@@ -26,11 +28,13 @@ var (
 
 type Mempool struct {
 	cache cache.Cache
+	bus   EventBus.Bus
 }
 
-func NewMempool() (*Mempool, error) {
+func NewMempool(bus EventBus.Bus) (*Mempool, error) {
 	mp := &Mempool{
 		cache: cache.NewInMemoryCache(), // here we need to use separate cache
+		bus:   bus,
 	}
 
 	return mp, nil
@@ -40,13 +44,21 @@ func (mp *Mempool) StoreTx(tx *types2.Transaction) error {
 	hashStr := hex.EncodeToString(tx.Hash)
 	err := mp.cache.StoreWithTTL(DefaultTxPrefix+hashStr, tx, DefaultTxTTL)
 	logrus.Infof("Submitted new transaction in mempool with hash %x", tx.Hash)
+	mp.bus.Publish("mempool:transactionAdded", tx)
 	return err
 }
 
-func (mp *Mempool) DeleteTx(txHash []byte) {
+func (mp *Mempool) DeleteTx(txHash []byte) error {
 	hashStr := hex.EncodeToString(txHash)
+	var tx types2.Transaction
+	err := mp.cache.Get(DefaultTxPrefix+hashStr, &tx)
+	if err != nil {
+		return err
+	}
 	mp.cache.Delete(DefaultTxPrefix + hashStr)
 	logrus.Debugf("Deleted transaction from mempool %x", txHash)
+	mp.bus.Publish("mempool:transactionRemoved", tx)
+	return nil
 }
 
 func (mp *Mempool) GetTransactionsForNewBlock() []*types2.Transaction {

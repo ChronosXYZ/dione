@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Arceliar/phony"
+	"github.com/asaskevich/EventBus"
 
 	"github.com/Secured-Finance/dione/beacon"
 	"github.com/drand/drand/chain"
@@ -32,17 +32,16 @@ var log = logrus.WithFields(logrus.Fields{
 })
 
 type DrandBeacon struct {
-	phony.Inbox
 	DrandClient        client.Client
 	PublicKey          kyber.Point
 	drandResultChannel <-chan client.Result
-	beaconEntryChannel chan types.BeaconEntry
 	cacheLock          sync.Mutex
 	localCache         map[uint64]types.BeaconEntry
 	latestDrandRound   uint64
+	bus                EventBus.Bus
 }
 
-func NewDrandBeacon(ps *pubsub.PubSub) (*DrandBeacon, error) {
+func NewDrandBeacon(ps *pubsub.PubSub, bus EventBus.Bus) (*DrandBeacon, error) {
 	cfg := config.NewDrandConfig()
 
 	drandChain, err := chain.InfoFromJSON(bytes.NewReader([]byte(cfg.ChainInfo)))
@@ -83,12 +82,12 @@ func NewDrandBeacon(ps *pubsub.PubSub) (*DrandBeacon, error) {
 	db := &DrandBeacon{
 		DrandClient: drandClient,
 		localCache:  make(map[uint64]types.BeaconEntry),
+		bus:         bus,
 	}
 
 	db.PublicKey = drandChain.PublicKey
 
 	db.drandResultChannel = db.DrandClient.Watch(context.TODO())
-	db.beaconEntryChannel = make(chan types.BeaconEntry)
 	err = db.getLatestDrandResult()
 	if err != nil {
 		return nil, err
@@ -120,7 +119,7 @@ func (db *DrandBeacon) loop(ctx context.Context) {
 			{
 				db.cacheValue(newBeaconEntryFromDrandResult(res))
 				db.updateLatestDrandRound(res.Round())
-				db.newEntry(res)
+				db.bus.Publish("beacon:newEntry", types.NewBeaconEntry(res.Round(), res.Randomness(), map[string]interface{}{"signature": res.Signature()}))
 			}
 		}
 	}
@@ -184,16 +183,6 @@ func (db *DrandBeacon) LatestBeaconRound() uint64 {
 	db.cacheLock.Lock()
 	defer db.cacheLock.Unlock()
 	return db.latestDrandRound
-}
-
-func (db *DrandBeacon) newEntry(res client.Result) {
-	db.Act(nil, func() {
-		db.beaconEntryChannel <- types.NewBeaconEntry(res.Round(), res.Randomness(), map[string]interface{}{"signature": res.Signature()})
-	})
-}
-
-func (db *DrandBeacon) NewEntries() <-chan types.BeaconEntry {
-	return db.beaconEntryChannel
 }
 
 func newBeaconEntryFromDrandResult(res client.Result) types.BeaconEntry {

@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"sync"
@@ -14,8 +15,6 @@ import (
 	"github.com/asaskevich/EventBus"
 
 	"github.com/Secured-Finance/dione/blockchain"
-
-	"github.com/Arceliar/phony"
 
 	types3 "github.com/Secured-Finance/dione/blockchain/types"
 
@@ -47,7 +46,6 @@ const (
 )
 
 type PBFTConsensusManager struct {
-	phony.Inbox
 	bus            EventBus.Bus
 	psb            *pubsub.PubSubRouter
 	minApprovals   int // FIXME
@@ -102,21 +100,11 @@ func NewPBFTConsensusManager(
 	pcm.psb.Hook(pubsub.PrePrepareMessageType, pcm.handlePrePrepare)
 	pcm.psb.Hook(pubsub.PrepareMessageType, pcm.handlePrepare)
 	pcm.psb.Hook(pubsub.CommitMessageType, pcm.handleCommit)
-	//bus.SubscribeOnce("sync:initialSyncCompleted", func() {
-	//	pcm.state.ready = true
-	//})
+	bus.SubscribeAsync("beacon:newEntry", func(entry types2.BeaconEntry) {
+		pcm.onNewBeaconEntry(entry)
+	}, true)
 	height, _ := pcm.blockchain.GetLatestBlockHeight()
 	pcm.state.blockHeight = height + 1
-	go func() {
-		for {
-			select {
-			case e := <-b.Beacon.NewEntries():
-				{
-					pcm.NewDrandRound(nil, e)
-				}
-			}
-		}
-	}()
 	return pcm
 }
 
@@ -263,94 +251,105 @@ func (pcm *PBFTConsensusManager) handleCommit(message *pubsub.PubSubMessage) {
 	}
 }
 
-func (pcm *PBFTConsensusManager) NewDrandRound(from phony.Actor, entry types2.BeaconEntry) {
-	pcm.Act(from, func() {
-		pcm.state.mutex.Lock()
-		defer pcm.state.mutex.Unlock()
-		block, err := pcm.commitAcceptedBlocks()
+func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {
+	block, err := pcm.commitAcceptedBlocks()
+	if err != nil {
+		if errors.Is(err, ErrNoAcceptedBlocks) {
+			logrus.WithFields(logrus.Fields{
+				"round": pcm.state.blockHeight,
+			}).Infof("No accepted blocks in the current consensus round")
+		} else {
+			logrus.Errorf("Failed to select the block in consensus round %d: %s", pcm.state.blockHeight, err.Error())
+			return
+		}
+	}
+
+	if block != nil {
+		// broadcast new block
+		var newBlockMessage pubsub.PubSubMessage
+		newBlockMessage.Type = pubsub.NewBlockMessageType
+		blockSerialized, err := cbor.Marshal(block)
 		if err != nil {
-			if errors.Is(err, ErrNoAcceptedBlocks) {
-				logrus.Infof("No accepted blocks for consensus round %d", pcm.state.blockHeight)
-			} else {
-				logrus.Errorf("Failed to select the block in consensus round %d: %s", pcm.state.blockHeight, err.Error())
-				return
-			}
+			logrus.Errorf("Failed to serialize block %x for broadcasting!", block.Header.Hash)
+		} else {
+			newBlockMessage.Payload = blockSerialized
+			pcm.psb.BroadcastToServiceTopic(&newBlockMessage)
 		}
 
-		if block != nil {
-			// broadcast new block
-			var newBlockMessage pubsub.PubSubMessage
-			newBlockMessage.Type = pubsub.NewBlockMessageType
-			blockSerialized, err := cbor.Marshal(block)
-			if err != nil {
-				logrus.Errorf("Failed to serialize block %x for broadcasting!", block.Header.Hash)
-			} else {
-				newBlockMessage.Payload = blockSerialized
-				pcm.psb.BroadcastToServiceTopic(&newBlockMessage)
-			}
-
-			// if we are miner for this block
-			// then post dione tasks to target chains (currently, only Ethereum)
-			if *block.Header.Proposer == pcm.miner.address {
-				for _, v := range block.Data {
-					var task types2.DioneTask
-					err := cbor.Unmarshal(v.Data, &task)
-					if err != nil {
-						logrus.Errorf("Failed to unmarshal transaction %x payload: %s", v.Hash, err.Error())
-						continue // FIXME
-					}
-					reqIDNumber, ok := big.NewInt(0).SetString(task.RequestID, 10)
-					if !ok {
-						logrus.Errorf("Failed to parse request id number in task of tx %x", v.Hash)
-						continue // FIXME
-					}
-
-					err = pcm.ethereumClient.SubmitRequestAnswer(reqIDNumber, task.Payload)
-					if err != nil {
-						logrus.Errorf("Failed to submit task in tx %x: %s", v.Hash, err.Error())
-						continue // FIXME
-					}
+		// if we are miner of this block
+		// then post dione tasks to target chains (currently, only Ethereum)
+		if block.Header.Proposer.String() == pcm.miner.address.String() {
+			for _, tx := range block.Data {
+				var task types2.DioneTask
+				err := cbor.Unmarshal(tx.Data, &task)
+				if err != nil {
+					logrus.WithFields(logrus.Fields{
+						"err":    err.Error(),
+						"txHash": hex.EncodeToString(tx.Hash),
+					}).Error("Failed to unmarshal transaction payload")
+					continue // FIXME
 				}
-			}
+				reqIDNumber, ok := big.NewInt(0).SetString(task.RequestID, 10)
+				if !ok {
+					logrus.WithFields(logrus.Fields{
+						"txHash": hex.EncodeToString(tx.Hash),
+					}).Error("Failed to parse request id number in Dione task")
+					continue // FIXME
+				}
 
-			pcm.state.blockHeight = pcm.state.blockHeight + 1
-		}
-
-		// get latest block
-		height, err := pcm.blockchain.GetLatestBlockHeight()
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-		blockHeader, err := pcm.blockchain.FetchBlockHeaderByHeight(height)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		pcm.state.drandRound = entry.Round
-		pcm.state.randomness = entry.Data
-
-		minedBlock, err := pcm.miner.MineBlock(entry.Data, entry.Round, blockHeader)
-		if err != nil {
-			if errors.Is(err, ErrNoTxForBlock) {
-				logrus.Info("Skipping consensus round, because we don't have transactions in mempool for including into block")
-			} else {
-				logrus.Errorf("Failed to mine the block: %s", err.Error())
-			}
-			return
-		}
-
-		// if we are round winner
-		if minedBlock != nil {
-			logrus.Infof("We are elected in consensus round %d", pcm.state.blockHeight)
-			err = pcm.propose(minedBlock)
-			if err != nil {
-				logrus.Errorf("Failed to propose the block: %s", err.Error())
-				return
+				err = pcm.ethereumClient.SubmitRequestAnswer(reqIDNumber, task.Payload)
+				if err != nil {
+					logrus.WithFields(logrus.Fields{
+						"err":    err.Error(),
+						"txHash": hex.EncodeToString(tx.Hash),
+						"reqID":  reqIDNumber.String(),
+					}).Error("Failed to submit task to ETH chain")
+					continue // FIXME
+				}
+				logrus.WithFields(logrus.Fields{
+					"txHash": hex.EncodeToString(tx.Hash),
+					"reqID":  reqIDNumber.String(),
+				}).Debug("Dione task has been sucessfully submitted to ETH chain (DioneOracle contract)")
 			}
 		}
-	})
+
+		pcm.state.blockHeight = pcm.state.blockHeight + 1
+	}
+
+	// get latest block
+	height, err := pcm.blockchain.GetLatestBlockHeight()
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	blockHeader, err := pcm.blockchain.FetchBlockHeaderByHeight(height)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+
+	pcm.state.drandRound = entry.Round
+	pcm.state.randomness = entry.Data
+
+	minedBlock, err := pcm.miner.MineBlock(entry.Data, entry.Round, blockHeader)
+	if err != nil {
+		if errors.Is(err, ErrNoTxForBlock) {
+			logrus.Info("Sealing skipped, no transactions in mempool")
+		} else {
+			logrus.Errorf("Failed to mine the block: %s", err.Error())
+		}
+		return
+	}
+
+	// if we are round winner
+	if minedBlock != nil {
+		logrus.WithField("round", pcm.state.blockHeight).Infof("We are elected in consensus round")
+		err = pcm.propose(minedBlock)
+		if err != nil {
+			logrus.Errorf("Failed to propose the block: %s", err.Error())
+			return
+		}
+	}
 }
 
 func (pcm *PBFTConsensusManager) commitAcceptedBlocks() (*types3.Block, error) {
@@ -374,10 +373,21 @@ func (pcm *PBFTConsensusManager) commitAcceptedBlocks() (*types3.Block, error) {
 		maxStake = stake
 		selectedBlock = v
 	}
-	logrus.Infof("Committed block %x with height %d of miner %s", selectedBlock.Header.Hash, selectedBlock.Header.Height, selectedBlock.Header.Proposer.String())
+	logrus.WithFields(logrus.Fields{
+		"hash":   hex.EncodeToString(selectedBlock.Header.Hash),
+		"height": selectedBlock.Header.Height,
+		"miner":  selectedBlock.Header.Proposer.String(),
+	}).Info("Committed new block")
 	pcm.blockPool.PruneAcceptedBlocks(selectedBlock)
 	for _, v := range selectedBlock.Data {
-		pcm.mempool.DeleteTx(v.Hash)
+		err := pcm.mempool.DeleteTx(v.Hash)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"err": err.Error(),
+				"tx":  hex.EncodeToString(v.Hash),
+			}).Errorf("Failed to delete committed tx from mempool")
+			continue
+		}
 	}
 	return selectedBlock, pcm.blockchain.StoreBlock(selectedBlock)
 }

@@ -166,7 +166,10 @@ func NewConsensusValidator(miner *Miner, bc *blockchain.BlockChain, b beacon.Bea
 							return
 						}
 					} else {
-						logrus.Debugf("Origin chain [%v]/request type[%v] doesn't have any payload validation!", task.OriginChain, task.RequestType)
+						logrus.WithFields(logrus.Fields{
+							"originChain": task.OriginChain,
+							"requestType": task.RequestType,
+						}).Debug("This origin chain/request type doesn't have any payload validation!")
 					}
 				}(v, result)
 			}

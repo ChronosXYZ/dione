@@ -93,7 +93,13 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 		logrus.Fatal(err)
 	}
 	n.Host = lhost
-	logrus.Info("Libp2p host has been successfully initialized!")
+	logrus.WithField(
+		"multiaddress",
+		fmt.Sprintf("/ip4/%s/tcp/%d/p2p/%s",
+			n.Config.ListenAddr,
+			n.Config.ListenPort,
+			n.Host.ID().Pretty(),
+		)).Info("Libp2p host has been initialized!")
 
 	// initialize ethereum client
 	ethClient, err := provideEthereumClient(n.Config)
@@ -101,14 +107,14 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 		logrus.Fatal(err)
 	}
 	n.Ethereum = ethClient
-	logrus.Info("Ethereum client has been successfully initialized!")
+	logrus.WithField("ethAddress", ethClient.GetEthAddress().Hex()).Info("Ethereum client has been initialized!")
 
 	// initialize blockchain rpc clients
 	err = n.setupRPCClients()
 	if err != nil {
 		logrus.Fatal(err)
 	}
-	logrus.Info("RPC clients has been successfully configured!")
+	logrus.Info("Foreign Blockchain RPC clients has been successfully configured!")
 
 	// initialize pubsub subsystem
 	psb := providePubsubRouter(lhost, n.Config)
@@ -137,7 +143,7 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 	// == initialize blockchain modules
 
 	// initialize blockpool database
-	bc, err := provideBlockChain(n.Config)
+	bc, err := provideBlockChain(n.Config, bus)
 	if err != nil {
 		logrus.Fatalf("Failed to initialize blockpool: %s", err.Error())
 	}
@@ -145,14 +151,14 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 	logrus.Info("Block pool database has been successfully initialized!")
 
 	// initialize mempool
-	mp, err := provideMemPool()
+	mp, err := provideMemPool(bus)
 	if err != nil {
 		logrus.Fatalf("Failed to initialize mempool: %s", err.Error())
 	}
 	n.MemPool = mp
 	logrus.Info("Mempool has been successfully initialized!")
 
-	bp, err := provideBlockPool(mp)
+	bp, err := provideBlockPool(mp, bus)
 	if err != nil {
 		logrus.Fatalf("Failed to initialize blockpool: %s", err.Error())
 	}
@@ -166,7 +172,7 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 	if err != nil {
 		logrus.Fatal(err)
 	}
-	logrus.Info("Node p2p RPC network service has been successfully initialized!")
+	logrus.Info("Direct RPC has been successfully initialized!")
 
 	// initialize libp2p-gorpc client
 	r := provideP2PRPCClient(lhost)
@@ -184,7 +190,7 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 		logrus.Fatal(err)
 	}
 	n.SyncManager = sm
-	logrus.Info("Blockchain synchronization subsystem has been successfully initialized!")
+	logrus.Info("Blockchain sync subsystem has been successfully initialized!")
 
 	// initialize mining subsystem
 	miner := provideMiner(n.Host.ID(), *n.Ethereum.GetEthAddress(), n.Ethereum, prvKey, mp)
@@ -192,7 +198,7 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 	logrus.Info("Mining subsystem has been initialized!")
 
 	// initialize random beacon network subsystem
-	randomBeaconNetwork, err := provideBeacon(psb.Pubsub)
+	randomBeaconNetwork, err := provideBeacon(psb.Pubsub, bus)
 	if err != nil {
 		logrus.Fatal(err)
 	}
@@ -238,8 +244,6 @@ func (n *Node) Run(ctx context.Context) error {
 }
 
 func (n *Node) runLibp2pAsync(ctx context.Context) error {
-	logrus.Info(fmt.Sprintf("[*] Your Multiaddress Is: /ip4/%s/tcp/%d/p2p/%s", n.Config.ListenAddr, n.Config.ListenPort, n.Host.ID().Pretty()))
-
 	logrus.Info("Announcing ourselves...")
 	_, err := n.PeerDiscovery.Advertise(context.TODO(), n.Config.Rendezvous)
 	if err != nil {
@@ -267,12 +271,15 @@ func (n *Node) runLibp2pAsync(ctx context.Context) error {
 					if newPeer.ID.String() == n.Host.ID().String() {
 						continue
 					}
-					logrus.Infof("Found peer: %s", newPeer)
+					logrus.WithField("peer", newPeer.ID).Info("Discovered new peer, connecting...")
 					// Connect to the peer
 					if err := n.Host.Connect(ctx, newPeer); err != nil {
-						logrus.Warn("Connection failed: ", err)
+						logrus.WithFields(logrus.Fields{
+							"peer": newPeer.ID,
+							"err":  err.Error(),
+						}).Warn("Connection with newly discovered peer has been failed")
 					}
-					logrus.Info("Connected to newly discovered peer: ", newPeer)
+					logrus.WithField("peer", newPeer.ID).Info("Connected to newly discovered peer")
 				}
 			}
 		}
@@ -348,6 +355,7 @@ func (n *Node) setupRPCClients() error {
 func Start() {
 	logrus.SetReportCaller(true)
 	logrus.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp: true,
 		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
 			filename := path.Base(f.File)
 			return "", fmt.Sprintf("%s:%d:", filename, f.Line)

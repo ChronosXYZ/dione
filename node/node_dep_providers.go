@@ -64,8 +64,8 @@ func provideMiner(peerID peer.ID, ethAddress common.Address, ethClient *ethclien
 	return consensus.NewMiner(peerID, ethAddress, ethClient, privateKey, mempool)
 }
 
-func provideBeacon(ps *pubsub2.PubSub) (beacon.BeaconNetwork, error) {
-	bc, err := drand2.NewDrandBeacon(ps)
+func provideBeacon(ps *pubsub2.PubSub, bus EventBus.Bus) (beacon.BeaconNetwork, error) {
+	bc, err := drand2.NewDrandBeacon(ps, bus)
 	if err != nil {
 		return beacon.BeaconNetwork{}, fmt.Errorf("failed to setup drand beacon: %w", err)
 	}
@@ -176,12 +176,12 @@ func providePeerDiscovery(baddrs []multiaddr.Multiaddr, h host.Host, pexDiscover
 	return pexDiscovery, nil
 }
 
-func provideBlockChain(config *config.Config) (*blockchain.BlockChain, error) {
-	return blockchain.NewBlockChain(config.Blockchain.DatabasePath)
+func provideBlockChain(config *config.Config, bus EventBus.Bus) (*blockchain.BlockChain, error) {
+	return blockchain.NewBlockChain(config.Blockchain.DatabasePath, bus)
 }
 
-func provideMemPool() (*pool.Mempool, error) {
-	return pool.NewMempool()
+func provideMemPool(bus EventBus.Bus) (*pool.Mempool, error) {
+	return pool.NewMempool(bus)
 }
 
 func provideSyncManager(bus EventBus.Bus, bp *blockchain.BlockChain, mp *pool.Mempool, r *gorpc.Client, bootstrap multiaddr.Multiaddr, psb *pubsub.PubSubRouter) (sync.SyncManager, error) {
@@ -205,6 +205,6 @@ func provideNetworkService(bp *blockchain.BlockChain, mp *pool.Mempool) *Network
 	return NewNetworkService(bp, mp)
 }
 
-func provideBlockPool(mp *pool.Mempool) (*pool.BlockPool, error) {
-	return pool.NewBlockPool(mp)
+func provideBlockPool(mp *pool.Mempool, bus EventBus.Bus) (*pool.BlockPool, error) {
+	return pool.NewBlockPool(mp, bus)
 }
