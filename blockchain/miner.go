@@ -1,10 +1,13 @@
-package consensus
+package blockchain
 
 import (
 	"errors"
 	"fmt"
 	"math/big"
 	"sync"
+
+	"github.com/Secured-Finance/dione/beacon"
+	"github.com/Secured-Finance/dione/types"
 
 	"github.com/Secured-Finance/dione/blockchain/pool"
 
@@ -96,7 +99,7 @@ func (m *Miner) MineBlock(randomness []byte, randomnessRound uint64, lastBlockHe
 		return nil, fmt.Errorf("failed to update miner stake: %w", err)
 	}
 
-	winner, err := IsRoundWinner(
+	winner, err := isRoundWinner(
 		lastBlockHeader.Height+1,
 		m.address,
 		randomness,
@@ -110,6 +113,7 @@ func (m *Miner) MineBlock(randomness []byte, randomnessRound uint64, lastBlockHe
 	}
 
 	if winner == nil {
+		logrus.WithField("height", lastBlockHeader.Height+1).Debug("Block is not mined because we are not leader in consensus round")
 		return nil, nil
 	}
 
@@ -135,4 +139,32 @@ func (m *Miner) IsMinerEligibleToProposeBlock(ethAddress common.Address) error {
 		return errors.New("miner doesn't have enough staked tokens")
 	}
 	return nil
+}
+
+func isRoundWinner(round uint64,
+	worker peer.ID, randomness []byte, randomnessRound uint64, minerStake, networkStake *big.Int, privKey crypto.PrivKey) (*types.ElectionProof, error) {
+
+	buf, err := worker.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal address: %w", err)
+	}
+
+	electionRand, err := beacon.DrawRandomness(randomness, beacon.RandomnessTypeElectionProofProduction, round, buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to draw randomness: %w", err)
+	}
+
+	vrfout, err := beacon.ComputeVRF(privKey, electionRand)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute VRF: %w", err)
+	}
+
+	ep := &types.ElectionProof{VRFProof: vrfout, RandomnessRound: randomnessRound}
+	j := ep.ComputeWinCount(minerStake, networkStake)
+	ep.WinCount = j
+	if j < 1 {
+		return nil, nil
+	}
+
+	return ep, nil
 }

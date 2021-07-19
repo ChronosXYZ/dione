@@ -6,6 +6,8 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/libp2p/go-libp2p-core/peer"
+
 	"github.com/Secured-Finance/dione/beacon"
 
 	"github.com/fxamacker/cbor/v2"
@@ -53,11 +55,12 @@ type PBFTConsensusManager struct {
 	msgLog         *ConsensusMessageLog
 	validator      *ConsensusValidator
 	ethereumClient *ethclient.EthereumClient
-	miner          *Miner
+	miner          *blockchain.Miner
 	blockPool      *pool.BlockPool
 	mempool        *pool.Mempool
 	blockchain     *blockchain.BlockChain
 	state          *State
+	address        peer.ID
 }
 
 type State struct {
@@ -75,28 +78,32 @@ func NewPBFTConsensusManager(
 	minApprovals int,
 	privKey crypto.PrivKey,
 	ethereumClient *ethclient.EthereumClient,
-	miner *Miner,
+	miner *blockchain.Miner,
 	bc *blockchain.BlockChain,
 	bp *pool.BlockPool,
 	b beacon.BeaconNetwork,
 	mempool *pool.Mempool,
+	address peer.ID,
 ) *PBFTConsensusManager {
-	pcm := &PBFTConsensusManager{}
-	pcm.psb = psb
-	pcm.miner = miner
-	pcm.validator = NewConsensusValidator(miner, bc, b)
-	pcm.msgLog = NewConsensusMessageLog()
-	pcm.minApprovals = minApprovals
-	pcm.privKey = privKey
-	pcm.ethereumClient = ethereumClient
-	pcm.state = &State{
-		ready:  false,
-		status: StateStatusUnknown,
+	pcm := &PBFTConsensusManager{
+		psb:            psb,
+		miner:          miner,
+		validator:      NewConsensusValidator(miner, bc, b),
+		msgLog:         NewConsensusMessageLog(),
+		minApprovals:   minApprovals,
+		privKey:        privKey,
+		ethereumClient: ethereumClient,
+		state: &State{
+			ready:  false,
+			status: StateStatusUnknown,
+		},
+		bus:        bus,
+		blockPool:  bp,
+		mempool:    mempool,
+		blockchain: bc,
+		address:    address,
 	}
-	pcm.bus = bus
-	pcm.blockPool = bp
-	pcm.mempool = mempool
-	pcm.blockchain = bc
+
 	pcm.psb.Hook(pubsub.PrePrepareMessageType, pcm.handlePrePrepare)
 	pcm.psb.Hook(pubsub.PrepareMessageType, pcm.handlePrepare)
 	pcm.psb.Hook(pubsub.CommitMessageType, pcm.handleCommit)
@@ -120,8 +127,8 @@ func (pcm *PBFTConsensusManager) propose(blk *types3.Block) error {
 }
 
 func (pcm *PBFTConsensusManager) handlePrePrepare(message *pubsub.PubSubMessage) {
-	pcm.state.mutex.Lock()
-	defer pcm.state.mutex.Unlock()
+	//pcm.state.mutex.Lock()
+	//defer pcm.state.mutex.Unlock()
 	var prePrepare types.PrePrepareMessage
 	err := cbor.Unmarshal(message.Payload, &prePrepare)
 	if err != nil {
@@ -129,7 +136,7 @@ func (pcm *PBFTConsensusManager) handlePrePrepare(message *pubsub.PubSubMessage)
 		return
 	}
 
-	if *prePrepare.Block.Header.Proposer == pcm.miner.address {
+	if *prePrepare.Block.Header.Proposer == pcm.address {
 		return
 	}
 
@@ -144,7 +151,7 @@ func (pcm *PBFTConsensusManager) handlePrePrepare(message *pubsub.PubSubMessage)
 		logrus.Tracef("received existing pre_prepare msg for block %x", cmsg.Block.Header.Hash)
 		return
 	}
-	if !pcm.validator.Valid(cmsg, map[string]interface{}{"randomness": pcm.state.randomness}) {
+	if !pcm.validator.Valid(cmsg) {
 		logrus.Warnf("received invalid pre_prepare msg for block %x", cmsg.Block.Header.Hash)
 		return
 	}
@@ -163,8 +170,8 @@ func (pcm *PBFTConsensusManager) handlePrePrepare(message *pubsub.PubSubMessage)
 }
 
 func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
-	pcm.state.mutex.Lock()
-	defer pcm.state.mutex.Unlock()
+	//pcm.state.mutex.Lock()
+	//defer pcm.state.mutex.Unlock()
 	var prepare types.PrepareMessage
 	err := cbor.Unmarshal(message.Payload, &prepare)
 	if err != nil {
@@ -189,7 +196,7 @@ func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
 		return
 	}
 
-	if !pcm.validator.Valid(cmsg, nil) {
+	if !pcm.validator.Valid(cmsg) {
 		logrus.Warnf("received invalid prepare msg for block %x", cmsg.Blockhash)
 		return
 	}
@@ -208,8 +215,8 @@ func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
 }
 
 func (pcm *PBFTConsensusManager) handleCommit(message *pubsub.PubSubMessage) {
-	pcm.state.mutex.Lock()
-	defer pcm.state.mutex.Unlock()
+	//pcm.state.mutex.Lock()
+	//defer pcm.state.mutex.Unlock()
 	var commit types.CommitMessage
 	err := cbor.Unmarshal(message.Payload, &commit)
 	if err != nil {
@@ -233,7 +240,7 @@ func (pcm *PBFTConsensusManager) handleCommit(message *pubsub.PubSubMessage) {
 		logrus.Tracef("received existing commit msg for block %x", cmsg.Blockhash)
 		return
 	}
-	if !pcm.validator.Valid(cmsg, nil) {
+	if !pcm.validator.Valid(cmsg) {
 		logrus.Warnf("received invalid commit msg for block %x", cmsg.Blockhash)
 		return
 	}
@@ -281,39 +288,8 @@ func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {
 
 		// if we are miner of this block
 		// then post dione tasks to target chains (currently, only Ethereum)
-		if block.Header.Proposer.String() == pcm.miner.address.String() {
-			for _, tx := range block.Data {
-				var task types2.DioneTask
-				err := cbor.Unmarshal(tx.Data, &task)
-				if err != nil {
-					logrus.WithFields(logrus.Fields{
-						"err":    err.Error(),
-						"txHash": hex.EncodeToString(tx.Hash),
-					}).Error("Failed to unmarshal transaction payload")
-					continue // FIXME
-				}
-				reqIDNumber, ok := big.NewInt(0).SetString(task.RequestID, 10)
-				if !ok {
-					logrus.WithFields(logrus.Fields{
-						"txHash": hex.EncodeToString(tx.Hash),
-					}).Error("Failed to parse request id number in Dione task")
-					continue // FIXME
-				}
-
-				err = pcm.ethereumClient.SubmitRequestAnswer(reqIDNumber, task.Payload)
-				if err != nil {
-					logrus.WithFields(logrus.Fields{
-						"err":    err.Error(),
-						"txHash": hex.EncodeToString(tx.Hash),
-						"reqID":  reqIDNumber.String(),
-					}).Error("Failed to submit task to ETH chain")
-					continue // FIXME
-				}
-				logrus.WithFields(logrus.Fields{
-					"txHash": hex.EncodeToString(tx.Hash),
-					"reqID":  reqIDNumber.String(),
-				}).Debug("Dione task has been sucessfully submitted to ETH chain (DioneOracle contract)")
-			}
+		if block.Header.Proposer.String() == pcm.address.String() {
+			pcm.submitTasksFromBlock(block)
 		}
 
 		pcm.state.blockHeight = pcm.state.blockHeight + 1
@@ -336,7 +312,7 @@ func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {
 
 	minedBlock, err := pcm.miner.MineBlock(entry.Data, entry.Round, blockHeader)
 	if err != nil {
-		if errors.Is(err, ErrNoTxForBlock) {
+		if errors.Is(err, blockchain.ErrNoTxForBlock) {
 			logrus.Info("Sealing skipped, no transactions in mempool")
 		} else {
 			logrus.Errorf("Failed to mine the block: %s", err.Error())
@@ -352,6 +328,41 @@ func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {
 			logrus.Errorf("Failed to propose the block: %s", err.Error())
 			return
 		}
+	}
+}
+
+func (pcm *PBFTConsensusManager) submitTasksFromBlock(block *types3.Block) {
+	for _, tx := range block.Data {
+		var task types2.DioneTask
+		err := cbor.Unmarshal(tx.Data, &task)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"err":    err.Error(),
+				"txHash": hex.EncodeToString(tx.Hash),
+			}).Error("Failed to unmarshal transaction payload")
+			continue // FIXME
+		}
+		reqIDNumber, ok := big.NewInt(0).SetString(task.RequestID, 10)
+		if !ok {
+			logrus.WithFields(logrus.Fields{
+				"txHash": hex.EncodeToString(tx.Hash),
+			}).Error("Failed to parse request id number in Dione task")
+			continue // FIXME
+		}
+
+		err = pcm.ethereumClient.SubmitRequestAnswer(reqIDNumber, task.Payload)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"err":    err.Error(),
+				"txHash": hex.EncodeToString(tx.Hash),
+				"reqID":  reqIDNumber.String(),
+			}).Error("Failed to submit task to ETH chain")
+			continue // FIXME
+		}
+		logrus.WithFields(logrus.Fields{
+			"txHash": hex.EncodeToString(tx.Hash),
+			"reqID":  reqIDNumber.String(),
+		}).Debug("Dione task has been sucessfully submitted to ETH chain (DioneOracle contract)")
 	}
 }
 

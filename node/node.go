@@ -65,7 +65,7 @@ type Node struct {
 	Config           *config.Config
 	Ethereum         *ethclient.EthereumClient
 	ConsensusManager *consensus.PBFTConsensusManager
-	Miner            *consensus.Miner
+	Miner            *blockchain.Miner
 	Beacon           beacon.BeaconNetwork
 	DisputeManager   *consensus.DisputeManager
 	BlockPool        *pool.BlockPool
@@ -104,9 +104,10 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 	// initialize ethereum client
 	ethClient, err := provideEthereumClient(n.Config)
 	if err != nil {
-		logrus.Fatal(err)
+		logrus.WithField("err", err.Error()).Fatal("Failed to initialize Ethereum client")
 	}
 	n.Ethereum = ethClient
+	//goland:noinspection ALL
 	logrus.WithField("ethAddress", ethClient.GetEthAddress().Hex()).Info("Ethereum client has been initialized!")
 
 	// initialize blockchain rpc clients
@@ -135,20 +136,15 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 	n.PeerDiscovery = peerDiscovery
 	logrus.Info("Peer discovery subsystem has been initialized!")
 
-	// initialize event log cache subsystem
-	//c := provideCache(config)
-	//n.Cache = c
-	//logrus.Info("Event cache subsystem has initialized!")
+	// initialize random beacon network subsystem
+	randomBeaconNetwork, err := provideBeacon(psb.Pubsub, bus)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	n.Beacon = randomBeaconNetwork
+	logrus.Info("Random beacon subsystem has been initialized!")
 
 	// == initialize blockchain modules
-
-	// initialize blockpool database
-	bc, err := provideBlockChain(n.Config, bus)
-	if err != nil {
-		logrus.Fatalf("Failed to initialize blockpool: %s", err.Error())
-	}
-	n.BlockChain = bc
-	logrus.Info("Block pool database has been successfully initialized!")
 
 	// initialize mempool
 	mp, err := provideMemPool(bus)
@@ -157,6 +153,19 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 	}
 	n.MemPool = mp
 	logrus.Info("Mempool has been successfully initialized!")
+
+	// initialize mining subsystem
+	miner := provideMiner(n.Host.ID(), *n.Ethereum.GetEthAddress(), n.Ethereum, prvKey, mp)
+	n.Miner = miner
+	logrus.Info("Mining subsystem has been initialized!")
+
+	// initialize blockpool database
+	bc, err := provideBlockChain(n.Config, bus, miner, randomBeaconNetwork.Beacon)
+	if err != nil {
+		logrus.Fatalf("Failed to initialize blockpool: %s", err.Error())
+	}
+	n.BlockChain = bc
+	logrus.Info("Block pool database has been successfully initialized!")
 
 	bp, err := provideBlockPool(mp, bus)
 	if err != nil {
@@ -192,21 +201,8 @@ func NewNode(config *config.Config, prvKey crypto.PrivKey, pexDiscoveryUpdateTim
 	n.SyncManager = sm
 	logrus.Info("Blockchain sync subsystem has been successfully initialized!")
 
-	// initialize mining subsystem
-	miner := provideMiner(n.Host.ID(), *n.Ethereum.GetEthAddress(), n.Ethereum, prvKey, mp)
-	n.Miner = miner
-	logrus.Info("Mining subsystem has been initialized!")
-
-	// initialize random beacon network subsystem
-	randomBeaconNetwork, err := provideBeacon(psb.Pubsub, bus)
-	if err != nil {
-		logrus.Fatal(err)
-	}
-	n.Beacon = randomBeaconNetwork
-	logrus.Info("Random beacon subsystem has been initialized!")
-
 	// initialize consensus subsystem
-	consensusManager := provideConsensusManager(bus, psb, miner, bc, ethClient, prvKey, n.Config.ConsensusMinApprovals, bp, randomBeaconNetwork, mp)
+	consensusManager := provideConsensusManager(bus, psb, miner, bc, ethClient, prvKey, n.Config.ConsensusMinApprovals, bp, randomBeaconNetwork, mp, n.Host.ID())
 	n.ConsensusManager = consensusManager
 	logrus.Info("Consensus subsystem has been initialized!")
 

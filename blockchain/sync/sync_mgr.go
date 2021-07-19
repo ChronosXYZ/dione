@@ -3,6 +3,7 @@ package sync
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -51,11 +52,11 @@ type syncManager struct {
 	bus                  EventBus.Bus
 }
 
-func NewSyncManager(bus EventBus.Bus, bp *blockchain.BlockChain, mp *pool.Mempool, p2pRPCClient *gorpc.Client, bootstrapPeer peer.ID, psb *pubsub.PubSubRouter) SyncManager {
+func NewSyncManager(bus EventBus.Bus, bc *blockchain.BlockChain, mp *pool.Mempool, p2pRPCClient *gorpc.Client, bootstrapPeer peer.ID, psb *pubsub.PubSubRouter) SyncManager {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	sm := &syncManager{
 		bus:                  bus,
-		blockpool:            bp,
+		blockpool:            bc,
 		mempool:              mp,
 		ctx:                  ctx,
 		ctxCancelFunc:        cancelFunc,
@@ -66,6 +67,7 @@ func NewSyncManager(bus EventBus.Bus, bp *blockchain.BlockChain, mp *pool.Mempoo
 	}
 
 	psb.Hook(pubsub.NewTxMessageType, sm.onNewTransaction)
+	psb.Hook(pubsub.NewBlockMessageType, sm.onNewBlock)
 
 	go func() {
 		if err := sm.initialSync(); err != nil {
@@ -217,7 +219,7 @@ func (sm *syncManager) processReceivedBlock(block types2.Block) error {
 	}
 	verified, err := merkletree.VerifyProofUsing(previousBlockHeader.Hash, false, block.Header.LastHashProof, [][]byte{block.Header.Hash}, keccak256.New())
 	if err != nil {
-		return fmt.Errorf("failed to verify last block hash merkle proof: %s", err.Error())
+		return fmt.Errorf("failed to verify last block hash merkle proof: %w", err)
 	}
 	if !verified {
 		return fmt.Errorf("merkle hash of current block doesn't contain hash of previous block")
@@ -246,13 +248,30 @@ func (sm *syncManager) onNewTransaction(message *pubsub.PubSubMessage) {
 		return
 	}
 
+	// TODO add more checks on tx
 	if !tx.ValidateHash() {
-		logrus.Warn("failed to validate tx hash, rejecting it")
+		logrus.WithField("txHash", hex.EncodeToString(tx.Hash)).Warn("failed to validate transaction hash, rejecting it")
 		return
-	} // TODO add more checks on tx
+	}
 
 	err = sm.mempool.StoreTx(&tx)
 	if err != nil {
 		logrus.Warnf("failed to store incoming transaction in mempool: %s", err.Error())
+	}
+}
+
+func (sm *syncManager) onNewBlock(message *pubsub.PubSubMessage) {
+	var block types2.Block
+
+	err := cbor.Unmarshal(message.Payload, &block)
+	if err != nil {
+		logrus.WithField("err", err.Error()).Error("failed to unmarshal payload of NewBlock message")
+		return
+	}
+
+	err = sm.blockpool.StoreBlock(&block)
+	if err != nil {
+		logrus.WithField("err", err.Error()).Error("failed to store block from NewBlock message")
+		return
 	}
 }

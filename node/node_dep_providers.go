@@ -60,8 +60,8 @@ func provideDisputeManager(ctx context.Context, ethClient *ethclient.EthereumCli
 	return consensus.NewDisputeManager(ctx, ethClient, pcm, cfg.Ethereum.DisputeVoteWindow, bc)
 }
 
-func provideMiner(peerID peer.ID, ethAddress common.Address, ethClient *ethclient.EthereumClient, privateKey crypto.PrivKey, mempool *pool.Mempool) *consensus.Miner {
-	return consensus.NewMiner(peerID, ethAddress, ethClient, privateKey, mempool)
+func provideMiner(peerID peer.ID, ethAddress common.Address, ethClient *ethclient.EthereumClient, privateKey crypto.PrivKey, mempool *pool.Mempool) *blockchain.Miner {
+	return blockchain.NewMiner(peerID, ethAddress, ethClient, privateKey, mempool)
 }
 
 func provideBeacon(ps *pubsub2.PubSub, bus EventBus.Bus) (beacon.BeaconNetwork, error) {
@@ -94,7 +94,7 @@ func provideEthereumClient(config *config.Config) (*ethclient.EthereumClient, er
 	ethereum := ethclient.NewEthereumClient()
 	err := ethereum.Initialize(&config.Ethereum)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to initialize ethereum client: %v", err)
+		return nil, err
 	}
 	return ethereum, nil
 }
@@ -106,7 +106,7 @@ func providePubsubRouter(lhost host.Host, config *config.Config) *pubsub.PubSubR
 func provideConsensusManager(
 	bus EventBus.Bus,
 	psb *pubsub.PubSubRouter,
-	miner *consensus.Miner,
+	miner *blockchain.Miner,
 	bc *blockchain.BlockChain,
 	ethClient *ethclient.EthereumClient,
 	privateKey crypto.PrivKey,
@@ -114,6 +114,7 @@ func provideConsensusManager(
 	bp *pool.BlockPool,
 	b beacon.BeaconNetwork,
 	mp *pool.Mempool,
+	address peer.ID,
 ) *consensus.PBFTConsensusManager {
 	return consensus.NewPBFTConsensusManager(
 		bus,
@@ -126,6 +127,7 @@ func provideConsensusManager(
 		bp,
 		b,
 		mp,
+		address,
 	)
 }
 
@@ -176,8 +178,8 @@ func providePeerDiscovery(baddrs []multiaddr.Multiaddr, h host.Host, pexDiscover
 	return pexDiscovery, nil
 }
 
-func provideBlockChain(config *config.Config, bus EventBus.Bus) (*blockchain.BlockChain, error) {
-	return blockchain.NewBlockChain(config.Blockchain.DatabasePath, bus)
+func provideBlockChain(config *config.Config, bus EventBus.Bus, miner *blockchain.Miner, b beacon.BeaconAPI) (*blockchain.BlockChain, error) {
+	return blockchain.NewBlockChain(config.Blockchain.DatabasePath, bus, miner, b)
 }
 
 func provideMemPool(bus EventBus.Bus) (*pool.Mempool, error) {

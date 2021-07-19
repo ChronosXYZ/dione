@@ -43,7 +43,7 @@ func NewMempool(bus EventBus.Bus) (*Mempool, error) {
 func (mp *Mempool) StoreTx(tx *types2.Transaction) error {
 	hashStr := hex.EncodeToString(tx.Hash)
 	err := mp.cache.StoreWithTTL(DefaultTxPrefix+hashStr, tx, DefaultTxTTL)
-	logrus.Infof("Submitted new transaction in mempool with hash %x", tx.Hash)
+	logrus.WithField("txHash", hex.EncodeToString(tx.Hash)).Info("Submitted new transaction in mempool")
 	mp.bus.Publish("mempool:transactionAdded", tx)
 	return err
 }
@@ -56,7 +56,7 @@ func (mp *Mempool) DeleteTx(txHash []byte) error {
 		return err
 	}
 	mp.cache.Delete(DefaultTxPrefix + hashStr)
-	logrus.Debugf("Deleted transaction from mempool %x", txHash)
+	logrus.WithField("txHash", hex.EncodeToString(txHash)).Debugf("Deleted transaction from mempool")
 	mp.bus.Publish("mempool:transactionRemoved", tx)
 	return nil
 }

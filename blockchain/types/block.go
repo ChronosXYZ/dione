@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/binary"
 	"time"
 
 	"github.com/Secured-Finance/dione/types"
@@ -48,13 +49,16 @@ func CreateBlock(lastBlockHeader *BlockHeader, txs []*Transaction, minerEth comm
 	timestamp := time.Now().Unix()
 
 	// extract hashes from transactions
-	var txHashes [][]byte
+	var merkleHashes [][]byte
 	for _, tx := range txs {
-		txHashes = append(txHashes, tx.Hash)
+		merkleHashes = append(merkleHashes, tx.Hash)
 	}
-	txHashes = append(txHashes, lastBlockHeader.Hash)
+	merkleHashes = append(merkleHashes, lastBlockHeader.Hash)
+	timestampBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(timestampBytes, uint64(timestamp))
+	merkleHashes = append(merkleHashes, timestampBytes)
 
-	tree, err := merkletree.NewUsing(txHashes, keccak256.New(), false)
+	tree, err := merkletree.NewUsing(merkleHashes, keccak256.New(), true)
 	if err != nil {
 		return nil, err
 	}
