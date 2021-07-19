@@ -46,7 +46,7 @@ func GenesisBlock() *Block {
 }
 
 func CreateBlock(lastBlockHeader *BlockHeader, txs []*Transaction, minerEth common.Address, privateKey crypto.PrivKey, eproof *types.ElectionProof) (*Block, error) {
-	timestamp := time.Now().Unix()
+	timestamp := time.Now().UnixNano()
 
 	// extract hashes from transactions
 	var merkleHashes [][]byte
