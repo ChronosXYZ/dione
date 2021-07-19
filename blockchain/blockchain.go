@@ -133,12 +133,14 @@ func (bc *BlockChain) StoreBlock(block *types2.Block) error {
 		return nil
 	}
 
-	err := bc.ValidateBlock(block)
-	if err != nil {
-		return fmt.Errorf("failed to store block: %w", err)
+	if block.Header.Height != 0 {
+		err := bc.ValidateBlock(block)
+		if err != nil {
+			return fmt.Errorf("failed to store block: %w", err)
+		}
 	}
 
-	err = bc.dbEnv.Update(func(txn *lmdb.Txn) error {
+	err := bc.dbEnv.Update(func(txn *lmdb.Txn) error {
 		data, err := cbor.Marshal(block.Data)
 		if err != nil {
 			return err
