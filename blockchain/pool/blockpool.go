@@ -3,6 +3,7 @@ package pool
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/asaskevich/EventBus"
@@ -37,6 +38,7 @@ func (bp *BlockPool) AddBlock(block *types.Block) error {
 	if err != nil {
 		return err
 	}
+	logrus.WithField("hash", fmt.Sprintf("%x", block.Header.Hash)).Debug("New block discovered")
 	bp.bus.Publish("blockpool:knownBlockAdded", block)
 	return nil
 }

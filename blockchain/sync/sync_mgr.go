@@ -271,7 +271,10 @@ func (sm *syncManager) onNewBlock(message *pubsub.PubSubMessage) {
 
 	err = sm.blockpool.StoreBlock(&block)
 	if err != nil {
-		logrus.WithField("err", err.Error()).Error("failed to store block from NewBlock message")
+		logrus.WithFields(logrus.Fields{
+			"err":       err.Error(),
+			"blockHash": fmt.Sprintf("%x", block.Header.Hash),
+		}).Error("failed to store block from NewBlock message")
 		return
 	}
 }
