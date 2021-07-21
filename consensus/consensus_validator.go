@@ -3,7 +3,8 @@ package consensus
 import (
 	"encoding/hex"
 
-	"github.com/Secured-Finance/dione/beacon"
+	drand2 "github.com/Secured-Finance/dione/beacon/drand"
+
 	"github.com/sirupsen/logrus"
 
 	"github.com/Secured-Finance/dione/blockchain"
@@ -13,15 +14,15 @@ import (
 type ConsensusValidator struct {
 	validationFuncMap map[types2.ConsensusMessageType]func(msg types2.ConsensusMessage) bool
 	miner             *blockchain.Miner
-	beacon            beacon.BeaconNetwork
+	beacon            *drand2.DrandBeacon
 	blockchain        *blockchain.BlockChain
 }
 
-func NewConsensusValidator(miner *blockchain.Miner, bc *blockchain.BlockChain, b beacon.BeaconNetwork) *ConsensusValidator {
+func NewConsensusValidator(miner *blockchain.Miner, bc *blockchain.BlockChain, db *drand2.DrandBeacon) *ConsensusValidator {
 	cv := &ConsensusValidator{
 		miner:      miner,
 		blockchain: bc,
-		beacon:     b,
+		beacon:     db,
 	}
 
 	cv.validationFuncMap = map[types2.ConsensusMessageType]func(msg types2.ConsensusMessage) bool{

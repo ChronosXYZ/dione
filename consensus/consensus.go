@@ -7,9 +7,9 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/libp2p/go-libp2p-core/peer"
+	drand2 "github.com/Secured-Finance/dione/beacon/drand"
 
-	"github.com/Secured-Finance/dione/beacon"
+	"github.com/libp2p/go-libp2p-core/peer"
 
 	"github.com/fxamacker/cbor/v2"
 
@@ -82,14 +82,14 @@ func NewPBFTConsensusManager(
 	miner *blockchain.Miner,
 	bc *blockchain.BlockChain,
 	bp *pool.BlockPool,
-	b beacon.BeaconNetwork,
+	db *drand2.DrandBeacon,
 	mempool *pool.Mempool,
 	address peer.ID,
 ) *PBFTConsensusManager {
 	pcm := &PBFTConsensusManager{
 		psb:            psb,
 		miner:          miner,
-		validator:      NewConsensusValidator(miner, bc, b),
+		validator:      NewConsensusValidator(miner, bc, db),
 		msgLog:         NewConsensusMessageLog(),
 		minApprovals:   minApprovals,
 		privKey:        privKey,
@@ -105,15 +105,18 @@ func NewPBFTConsensusManager(
 		address:    address,
 	}
 
+	return pcm
+}
+
+func (pcm *PBFTConsensusManager) Run() {
 	pcm.psb.Hook(pubsub.PrePrepareMessageType, pcm.handlePrePrepare)
 	pcm.psb.Hook(pubsub.PrepareMessageType, pcm.handlePrepare)
 	pcm.psb.Hook(pubsub.CommitMessageType, pcm.handleCommit)
-	bus.SubscribeAsync("beacon:newEntry", func(entry types2.BeaconEntry) {
+	pcm.bus.SubscribeAsync("beacon:newEntry", func(entry types2.BeaconEntry) {
 		pcm.onNewBeaconEntry(entry)
 	}, true)
 	height, _ := pcm.blockchain.GetLatestBlockHeight()
 	pcm.state.blockHeight = height + 1
-	return pcm
 }
 
 func (pcm *PBFTConsensusManager) propose(blk *types3.Block) error {
@@ -194,7 +197,7 @@ func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
 	}
 
 	if _, err := pcm.blockPool.GetBlock(cmsg.Blockhash); errors.Is(err, cache.ErrNotFound) {
-		logrus.WithField("blockHash", cmsg.Blockhash).Warnf("received unknown block %x", cmsg.Blockhash)
+		logrus.WithField("blockHash", hex.EncodeToString(cmsg.Blockhash)).Warnf("received unknown block %x", cmsg.Blockhash)
 		return
 	}
 

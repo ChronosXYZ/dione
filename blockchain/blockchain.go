@@ -10,6 +10,8 @@ import (
 	"os"
 	"sync"
 
+	drand2 "github.com/Secured-Finance/dione/beacon/drand"
+
 	"github.com/Secured-Finance/dione/beacon"
 
 	"github.com/Secured-Finance/dione/consensus/validation"
@@ -47,16 +49,16 @@ type BlockChain struct {
 	metadataIndex *utils.Index
 	heightIndex   *utils.Index
 
-	bus   EventBus.Bus
-	miner *Miner
-	b     beacon.BeaconAPI
+	bus         EventBus.Bus
+	miner       *Miner
+	drandBeacon *drand2.DrandBeacon
 }
 
-func NewBlockChain(path string, bus EventBus.Bus, miner *Miner, b beacon.BeaconAPI) (*BlockChain, error) {
+func NewBlockChain(path string, bus EventBus.Bus, miner *Miner, db *drand2.DrandBeacon) (*BlockChain, error) {
 	chain := &BlockChain{
-		bus:   bus,
-		miner: miner,
-		b:     b,
+		bus:         bus,
+		miner:       miner,
+		drandBeacon: db,
 	}
 
 	// configure lmdb env
@@ -357,7 +359,7 @@ func (bc *BlockChain) ValidateBlock(block *types2.Block) error {
 		return err
 	}
 
-	res, err := bc.b.Entry(context.TODO(), block.Header.ElectionProof.RandomnessRound)
+	res, err := bc.drandBeacon.Entry(context.TODO(), block.Header.ElectionProof.RandomnessRound)
 	if err != nil {
 		return err
 	}

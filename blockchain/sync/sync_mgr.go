@@ -37,7 +37,9 @@ import (
 	gorpc "github.com/libp2p/go-libp2p-gorpc"
 )
 
-type SyncManager interface{}
+type SyncManager interface {
+	Run()
+}
 
 type syncManager struct {
 	blockpool            *blockchain.BlockChain
@@ -66,16 +68,18 @@ func NewSyncManager(bus EventBus.Bus, bc *blockchain.BlockChain, mp *pool.Mempoo
 		psb:                  psb,
 	}
 
-	psb.Hook(pubsub.NewTxMessageType, sm.onNewTransaction)
-	psb.Hook(pubsub.NewBlockMessageType, sm.onNewBlock)
+	return sm
+}
+
+func (sm *syncManager) Run() {
+	sm.psb.Hook(pubsub.NewTxMessageType, sm.onNewTransaction)
+	sm.psb.Hook(pubsub.NewBlockMessageType, sm.onNewBlock)
 
 	go func() {
 		if err := sm.initialSync(); err != nil {
 			logrus.Error(err)
 		}
 	}()
-
-	return sm
 }
 
 func (sm *syncManager) initialSync() error {
