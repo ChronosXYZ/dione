@@ -85,7 +85,7 @@ contract DioneOracle {
   function submitOracleRequest(uint256 _reqID, bytes memory _data) public onlyPendingRequest(_reqID) returns (bool) {
     require(pendingRequests[_reqID].deadline - int256(block.timestamp) >= 0, "submission has exceeded the deadline");
     delete pendingRequests[_reqID];
-    dioneStaking.mine(msg.sender);
+    dioneStaking.mineAndStake(msg.sender);
     pendingRequests[_reqID].callbackAddress.call(abi.encodeWithSelector(pendingRequests[_reqID].callbackMethodID, _reqID, _data));
     emit SubmittedOracleRequest(_reqID, _data);
     return true;
