@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/ethereum/go-ethereum/event"
+
 	types2 "github.com/Secured-Finance/dione/blockchain/types"
 
 	"github.com/Secured-Finance/dione/types"
@@ -28,51 +30,63 @@ type DisputeManager struct {
 	disputeMap    map[string]*dioneDispute.DioneDisputeNewDispute
 	voteWindow    time.Duration
 	blockchain    *blockchain.BlockChain
+
+	submissionChan         chan *dioneOracle.DioneOracleSubmittedOracleRequest
+	submissionSubscription event.Subscription
+
+	disputesChan         chan *dioneDispute.DioneDisputeNewDispute
+	disputesSubscription event.Subscription
 }
 
 func NewDisputeManager(ctx context.Context, ethClient *ethclient.EthereumClient, pcm *PBFTConsensusManager, voteWindow int, bc *blockchain.BlockChain) (*DisputeManager, error) {
-	newSubmittionsChan, submSubscription, err := ethClient.SubscribeOnNewSubmittions(ctx)
+	submissionChan, submSubscription, err := ethClient.SubscribeOnNewSubmittions(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	newDisputesChan, dispSubscription, err := ethClient.SubscribeOnNewDisputes(ctx)
+	disputesChan, dispSubscription, err := ethClient.SubscribeOnNewDisputes(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	dm := &DisputeManager{
-		ethClient:     ethClient,
-		pcm:           pcm,
-		ctx:           ctx,
-		submissionMap: map[string]*dioneOracle.DioneOracleSubmittedOracleRequest{},
-		disputeMap:    map[string]*dioneDispute.DioneDisputeNewDispute{},
-		voteWindow:    time.Duration(voteWindow) * time.Second,
-		blockchain:    bc,
+		ethClient:              ethClient,
+		pcm:                    pcm,
+		ctx:                    ctx,
+		submissionMap:          map[string]*dioneOracle.DioneOracleSubmittedOracleRequest{},
+		disputeMap:             map[string]*dioneDispute.DioneDisputeNewDispute{},
+		voteWindow:             time.Duration(voteWindow) * time.Second,
+		blockchain:             bc,
+		submissionChan:         submissionChan,
+		submissionSubscription: submSubscription,
+		disputesChan:           disputesChan,
+		disputesSubscription:   dispSubscription,
 	}
 
+	return dm, nil
+}
+
+func (dm *DisputeManager) Run(ctx context.Context) {
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				{
-					submSubscription.Unsubscribe()
-					dispSubscription.Unsubscribe()
+					dm.disputesSubscription.Unsubscribe()
+					dm.disputesSubscription.Unsubscribe()
 					return
 				}
-			case s := <-newSubmittionsChan:
+			case s := <-dm.submissionChan:
 				{
 					dm.onNewSubmission(s)
 				}
-			case d := <-newDisputesChan:
+			case d := <-dm.disputesChan:
 				{
 					dm.onNewDispute(d)
 				}
 			}
 		}
 	}()
-
-	return dm, nil
 }
 
 func (dm *DisputeManager) onNewSubmission(submission *dioneOracle.DioneOracleSubmittedOracleRequest) {

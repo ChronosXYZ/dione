@@ -20,6 +20,7 @@ type Config struct {
 	Redis                 RedisConfig      `mapstructure:"redis"`
 	CacheType             string           `mapstructure:"cache_type"`
 	Blockchain            BlockchainConfig `mapstructure:"blockchain"`
+	PrivateKeyPath        string           `mapstructure:"private_key_path"`
 }
 
 type EthereumConfig struct {

@@ -83,18 +83,21 @@ func NewDrandBeacon(ps *pubsub.PubSub, bus EventBus.Bus) (*DrandBeacon, error) {
 		DrandClient: drandClient,
 		localCache:  make(map[uint64]types.BeaconEntry),
 		bus:         bus,
+		PublicKey:   drandChain.PublicKey,
 	}
-
-	db.PublicKey = drandChain.PublicKey
-
-	db.drandResultChannel = db.DrandClient.Watch(context.TODO())
-	err = db.getLatestDrandResult()
-	if err != nil {
-		return nil, err
-	}
-	go db.loop(context.TODO())
 
 	return db, nil
+}
+
+func (db *DrandBeacon) Run(ctx context.Context) error {
+	db.drandResultChannel = db.DrandClient.Watch(ctx)
+	err := db.getLatestDrandResult()
+	if err != nil {
+		return err
+	}
+	go db.loop(ctx)
+
+	return nil
 }
 
 func (db *DrandBeacon) getLatestDrandResult() error {
@@ -113,6 +116,7 @@ func (db *DrandBeacon) loop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			{
+				logrus.Debug("Stopping watching new DRAND entries...")
 				return
 			}
 		case res := <-db.drandResultChannel:

@@ -29,10 +29,11 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	psr := &PubSubRouter{
-		node:          h,
-		context:       ctx,
-		contextCancel: ctxCancel,
-		handlers:      make(map[PubSubMessageType][]Handler),
+		node:            h,
+		context:         ctx,
+		contextCancel:   ctxCancel,
+		handlers:        make(map[PubSubMessageType][]Handler),
+		oracleTopicName: oracleTopic,
 	}
 
 	var pbOptions []pubsub.Option
@@ -61,7 +62,6 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 		logrus.Fatalf("Error occurred when initializing PubSub subsystem: %v", err)
 	}
 
-	psr.oracleTopicName = oracleTopic
 	topic, err := pb.Join(oracleTopic)
 	if err != nil {
 		logrus.Fatalf("Error occurred when subscribing to service topic: %v", err)
@@ -72,6 +72,10 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 	psr.Pubsub = pb
 	psr.oracleTopic = topic
 
+	return psr
+}
+
+func (psr *PubSubRouter) Run() {
 	go func() {
 		for {
 			select {
@@ -79,7 +83,7 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 				return
 			default:
 				{
-					msg, err := subscription.Next(psr.context)
+					msg, err := psr.serviceSubscription.Next(psr.context)
 					if err != nil {
 						logrus.Warnf("Failed to receive pubsub message: %v", err)
 					}
@@ -88,8 +92,6 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 			}
 		}
 	}()
-
-	return psr
 }
 
 func (psr *PubSubRouter) handleMessage(p *pubsub.Message) {
