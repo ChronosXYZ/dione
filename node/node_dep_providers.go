@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 
 	types2 "github.com/Secured-Finance/dione/blockchain/types"
@@ -309,6 +310,14 @@ func providePrivateKey(cfg *config.Config) crypto.PrivKey {
 		privateKey, err = generatePrivateKey()
 		if err != nil {
 			logrus.Fatal(err)
+		}
+
+		dirName := filepath.Dir(cfg.PrivateKeyPath)
+		if _, err := os.Stat(dirName); os.IsNotExist(err) {
+			err := os.MkdirAll(dirName, 0755)
+			if err != nil {
+				logrus.Fatalf("Cannot create private key file: %s", err.Error())
+			}
 		}
 
 		f, err := os.Create(cfg.PrivateKeyPath)
