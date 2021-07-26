@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/Secured-Finance/dione/blockchain"
+
 	drand2 "github.com/Secured-Finance/dione/beacon/drand"
 
 	"github.com/Secured-Finance/dione/pubsub"
@@ -50,6 +52,7 @@ func runNode(
 	pubSubRouter *pubsub.PubSubRouter,
 	disputeManager *consensus.DisputeManager,
 	db *drand2.DrandBeacon,
+	bc *blockchain.BlockChain,
 ) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -200,7 +203,7 @@ func Start() {
 			providePeerDiscovery,
 			provideDrandBeacon,
 			provideMempool,
-			provideMiner,
+			blockchain.NewMiner,
 			provideBlockChain,
 			provideBlockPool,
 			provideSyncManager,
@@ -214,8 +217,10 @@ func Start() {
 			configureLogger,
 			configureDirectRPC,
 			configureForeignBlockchainRPC,
+			initializeBlockchain,
+			configureMiner,
 			runNode,
 		),
-		fx.NopLogger,
+		//fx.NopLogger,
 	).Run()
 }

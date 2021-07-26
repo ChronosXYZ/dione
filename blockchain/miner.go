@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
+
+	"github.com/libp2p/go-libp2p-core/host"
+
+	"github.com/asaskevich/EventBus"
 
 	"github.com/Secured-Finance/dione/beacon"
 	"github.com/Secured-Finance/dione/types"
@@ -27,34 +30,54 @@ var (
 )
 
 type Miner struct {
-	address      peer.ID
-	ethAddress   common.Address
-	mutex        sync.Mutex
-	ethClient    *ethclient.EthereumClient
-	minerStake   *big.Int
-	networkStake *big.Int
-	privateKey   crypto.PrivKey
-	mempool      *pool.Mempool
+	bus               EventBus.Bus
+	address           peer.ID
+	ethClient         *ethclient.EthereumClient
+	minerStake        *big.Int
+	networkStake      *big.Int
+	privateKey        crypto.PrivKey
+	mempool           *pool.Mempool
+	latestBlockHeader *types2.BlockHeader
+	blockchain        *BlockChain
 }
 
 func NewMiner(
-	address peer.ID,
-	ethAddress common.Address,
+	h host.Host,
 	ethClient *ethclient.EthereumClient,
 	privateKey crypto.PrivKey,
 	mempool *pool.Mempool,
+	bus EventBus.Bus,
 ) *Miner {
-	return &Miner{
-		address:    address,
-		ethAddress: ethAddress,
+	m := &Miner{
+		address:    h.ID(),
 		ethClient:  ethClient,
 		privateKey: privateKey,
 		mempool:    mempool,
+		bus:        bus,
 	}
+
+	return m
+}
+
+func (m *Miner) SetBlockchainInstance(b *BlockChain) {
+	m.blockchain = b
+
+	m.bus.SubscribeAsync("blockchain:latestBlockHeightUpdated", func(block *types2.Block) {
+		m.latestBlockHeader = block.Header
+	}, true)
+
+	height, _ := m.blockchain.GetLatestBlockHeight()
+	header, err := m.blockchain.FetchBlockHeaderByHeight(height)
+	if err != nil {
+		logrus.WithField("err", err.Error()).Fatal("Failed to initialize miner subsystem")
+	}
+	m.latestBlockHeader = header
+
+	logrus.Info("Mining subsystem has been initialized!")
 }
 
 func (m *Miner) UpdateCurrentStakeInfo() error {
-	mStake, err := m.ethClient.GetMinerStake(m.ethAddress)
+	mStake, err := m.ethClient.GetMinerStake(*m.ethClient.GetEthAddress())
 
 	if err != nil {
 		logrus.Warn("Can't get miner stake", err)
@@ -92,15 +115,19 @@ func (m *Miner) GetStakeInfo(miner common.Address) (*big.Int, *big.Int, error) {
 	return mStake, nStake, nil
 }
 
-func (m *Miner) MineBlock(randomness []byte, randomnessRound uint64, lastBlockHeader *types2.BlockHeader) (*types2.Block, error) {
-	logrus.WithField("height", lastBlockHeader.Height+1).Debug("Trying to mine new block...")
+func (m *Miner) MineBlock(randomness []byte, randomnessRound uint64) (*types2.Block, error) {
+	if m.latestBlockHeader == nil {
+		return nil, fmt.Errorf("latest block header is null")
+	}
+
+	logrus.WithField("height", m.latestBlockHeader.Height+1).Debug("Trying to mine new block...")
 
 	if err := m.UpdateCurrentStakeInfo(); err != nil {
 		return nil, fmt.Errorf("failed to update miner stake: %w", err)
 	}
 
 	winner, err := isRoundWinner(
-		lastBlockHeader.Height+1,
+		m.latestBlockHeader.Height+1,
 		m.address,
 		randomness,
 		randomnessRound,
@@ -113,16 +140,18 @@ func (m *Miner) MineBlock(randomness []byte, randomnessRound uint64, lastBlockHe
 	}
 
 	if winner == nil {
-		logrus.WithField("height", lastBlockHeader.Height+1).Debug("Block is not mined because we are not leader in consensus round")
+		logrus.WithField("height", m.latestBlockHeader.Height+1).Debug("Block is not mined because we are not leader in consensus round")
 		return nil, nil
 	}
+
+	logrus.WithField("height", m.latestBlockHeader.Height+1).Infof("We have been elected in the current consensus round")
 
 	txs := m.mempool.GetTransactionsForNewBlock()
 	if txs == nil {
 		return nil, ErrNoTxForBlock // skip new consensus round because there is no transaction for processing
 	}
 
-	newBlock, err := types2.CreateBlock(lastBlockHeader, txs, m.ethAddress, m.privateKey, winner)
+	newBlock, err := types2.CreateBlock(m.latestBlockHeader, txs, *m.ethClient.GetEthAddress(), m.privateKey, winner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new block: %w", err)
 	}

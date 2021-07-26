@@ -85,3 +85,14 @@ func (rc *RedisCache) Delete(key string) {
 func (rc *RedisCache) Items() map[string]interface{} {
 	return nil // TODO
 }
+
+func (rc *RedisCache) Exists(key string) bool {
+	res := rc.Client.Exists(context.TODO(), key)
+	if res.Err() != nil {
+		return false
+	}
+	if res.Val() == 0 {
+		return false
+	}
+	return true
+}

@@ -13,4 +13,5 @@ type Cache interface {
 	Get(key string, value interface{}) error
 	Delete(key string)
 	Items() map[string]interface{}
+	Exists(key string) bool
 }

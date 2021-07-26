@@ -10,6 +10,8 @@ import (
 	"path"
 	"runtime"
 
+	types2 "github.com/Secured-Finance/dione/blockchain/types"
+
 	"github.com/Secured-Finance/dione/rpc"
 	"github.com/Secured-Finance/dione/rpc/filecoin"
 	solana2 "github.com/Secured-Finance/dione/rpc/solana"
@@ -76,12 +78,6 @@ func provideDisputeManager(ethClient *ethclient.EthereumClient, pcm *consensus.P
 	return dm
 }
 
-func provideMiner(h host.Host, ethClient *ethclient.EthereumClient, privateKey crypto.PrivKey, mempool *pool.Mempool) *blockchain.Miner {
-	miner := blockchain.NewMiner(h.ID(), *ethClient.GetEthAddress(), ethClient, privateKey, mempool)
-	logrus.Info("Mining subsystem has been initialized!")
-	return miner
-}
-
 func provideDrandBeacon(ps *pubsub.PubSubRouter, bus EventBus.Bus) *drand2.DrandBeacon {
 	db, err := drand2.NewDrandBeacon(ps.Pubsub, bus)
 	if err != nil {
@@ -135,7 +131,7 @@ func provideConsensusManager(
 	bc *blockchain.BlockChain,
 	ethClient *ethclient.EthereumClient,
 	privateKey crypto.PrivKey,
-	bp *pool.BlockPool,
+	bp *consensus.ConsensusRoundPool,
 	db *drand2.DrandBeacon,
 	mp *pool.Mempool,
 ) *consensus.PBFTConsensusManager {
@@ -268,8 +264,8 @@ func provideNetworkService(bp *blockchain.BlockChain, mp *pool.Mempool) *Network
 	return ns
 }
 
-func provideBlockPool(mp *pool.Mempool, bus EventBus.Bus) *pool.BlockPool {
-	bp, err := pool.NewBlockPool(mp, bus)
+func provideBlockPool(mp *pool.Mempool, bus EventBus.Bus) *consensus.ConsensusRoundPool {
+	bp, err := consensus.NewConsensusRoundPool(mp, bus)
 	if err != nil {
 		logrus.Fatalf("Failed to initialize blockpool: %s", err.Error())
 	}
@@ -391,4 +387,20 @@ func configureForeignBlockchainRPC() {
 	})
 
 	logrus.Info("Foreign Blockchain RPC clients has been successfully configured!")
+}
+
+func configureMiner(m *blockchain.Miner, b *blockchain.BlockChain) {
+	m.SetBlockchainInstance(b)
+}
+
+func initializeBlockchain(bc *blockchain.BlockChain) {
+	_, err := bc.GetLatestBlockHeight()
+	if err == blockchain.ErrLatestHeightNil {
+		gBlock := types2.GenesisBlock()
+		err = bc.StoreBlock(gBlock) // commit genesis block
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		logrus.Info("Committed genesis block")
+	}
 }

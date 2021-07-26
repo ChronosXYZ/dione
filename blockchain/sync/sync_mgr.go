@@ -98,21 +98,14 @@ func (sm *syncManager) doInitialBlockPoolSync() error {
 		return nil
 	}
 
-	ourLastHeight, err := sm.blockpool.GetLatestBlockHeight()
-	if err == blockchain.ErrLatestHeightNil {
-		gBlock := types2.GenesisBlock()
-		err = sm.blockpool.StoreBlock(gBlock) // commit genesis block
-		if err != nil {
-			return err
-		}
-	}
+	ourLastHeight, _ := sm.blockpool.GetLatestBlockHeight()
 
 	if sm.bootstrapPeer == "" {
 		return nil // FIXME
 	}
 
 	var reply wire.LastBlockHeightReply
-	err = sm.rpcClient.Call(sm.bootstrapPeer, "NetworkService", "LastBlockHeight", nil, &reply)
+	err := sm.rpcClient.Call(sm.bootstrapPeer, "NetworkService", "LastBlockHeight", nil, &reply)
 	if err != nil {
 		return err
 	}

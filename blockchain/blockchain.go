@@ -181,10 +181,6 @@ func (bc *BlockChain) StoreBlock(block *types2.Block) error {
 		if err = bc.setLatestBlockHeight(block.Header.Height); err != nil {
 			return err
 		}
-	} else if block.Header.Height > height {
-		if err = bc.setLatestBlockHeight(block.Header.Height); err != nil {
-			return err
-		}
 		bc.bus.Publish("blockchain:latestBlockHeightUpdated", block)
 	}
 	bc.bus.Publish("blockchain:blockCommitted", block)

@@ -62,3 +62,8 @@ func (imc *InMemoryCache) Items() map[string]interface{} {
 	}
 	return m
 }
+
+func (imc *InMemoryCache) Exists(key string) bool {
+	_, exists := imc.cache.Get(key)
+	return exists
+}

@@ -106,7 +106,7 @@ func lambda(power, totalPower *big.Int) *big.Int {
 	return lam
 }
 
-var MaxWinCount = 3 * config.ExpectedLeadersPerEpoch.Int64()
+var MaxWinCount = 10 * config.ExpectedLeadersPerEpoch.Int64()
 
 type poiss struct {
 	lam  *big.Int

@@ -2,4 +2,4 @@ package config
 
 import "math/big"
 
-var ExpectedLeadersPerEpoch = big.NewInt(1)
+var ExpectedLeadersPerEpoch = big.NewInt(2)
