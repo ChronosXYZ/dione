@@ -5,6 +5,7 @@ import "solidity-coverage";
 import "hardhat-gas-reporter";
 import * as secrets from "./secrets.json";
 import "./hardhat.tasks";
+import "@nomiclabs/hardhat-etherscan";
 
 export default {
   solidity: {
@@ -20,5 +21,8 @@ export default {
   gasReporter: {
     currency: 'USD',
     enabled: process.env.REPORT_GAS
+  },
+  etherscan: {
+    apiKey: secrets.etherscanApiKey
   }
 };

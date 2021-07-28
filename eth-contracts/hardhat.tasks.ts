@@ -27,7 +27,7 @@ task("oracleRequest", "Makes oracle request to Mediator contract")
     .setAction(async (args, hre) => {
         const Mediator = await hre.ethers.getContractFactory("Mediator");
         const contract = Mediator.attach(args.contract);
-        const res = await contract.request(args.chainid, args.method, args.param)
+        const res = await contract.request(parseInt(args.chainid), args.method, args.param)
         console.log("Request has successfully been sent.")
         console.log("Transaction info:")
         console.log(res)
