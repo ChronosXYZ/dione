@@ -1,30 +1,24 @@
-import { task } from "hardhat/config";
 import "@nomiclabs/hardhat-ethers";
 import "hardhat-tracer";
 import "@nomiclabs/hardhat-waffle";
 import "solidity-coverage";
 import "hardhat-gas-reporter";
-
-task("accounts", "Prints the list of accounts", async (args, hre) => {
-  const accounts = await hre.ethers.getSigners();
-
-  for (const account of accounts) {
-    console.log(await account.address);
-  }
-});
+import * as secrets from "./secrets.json";
+import "./hardhat.tasks";
 
 export default {
-  solidity: "0.8.3",
-  networks: {
-    geth: {
-      url: `http://localhost:8545`,
-      accounts: {
-        mnemonic: "test test test test test test test test test test test junk"
+  solidity: {
+    version: "0.8.3",
+    settings: {
+      optimizer: {
+        enabled: false,
+        runs: 200
       }
     }
   },
+  networks: secrets.networks,
   gasReporter: {
     currency: 'USD',
-    enabled: (process.env.REPORT_GAS) ? true : false
+    enabled: process.env.REPORT_GAS
   }
 };
