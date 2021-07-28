@@ -52,7 +52,6 @@ func runNode(
 	pubSubRouter *pubsub.PubSubRouter,
 	disputeManager *consensus.DisputeManager,
 	db *drand2.DrandBeacon,
-	bc *blockchain.BlockChain,
 ) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -221,6 +220,6 @@ func Start() {
 			configureMiner,
 			runNode,
 		),
-		//fx.NopLogger,
+		fx.NopLogger,
 	).Run()
 }
