@@ -5,7 +5,7 @@ import deploy from "../common/deployment";
 
 describe("DioneOracle", function () {
   let dioneOracle: Contract;
-  let dioneToken: Contract;
+  let dioneStaking: Contract;
 
   beforeEach(async function () {
     const contracts = await deploy({
@@ -20,11 +20,11 @@ describe("DioneOracle", function () {
       minStakeForDisputeVotes: 100
     });
     dioneOracle = contracts.dioneOracle;
-    dioneToken = contracts.dioneToken;
+    dioneStaking = contracts.dioneStaking;
   });
 
   it("should create request and cancel it", async function () {
-    const timestamp = 1625097600;
+    const timestamp = new Date().getTime();
     await ethers.provider.send("evm_setNextBlockTimestamp", [timestamp]);
     const requestDeadline = timestamp + 300;
     await expect(dioneOracle.requestOracles(1, "getTransaction", "bafy2bzaceaaab3kkoaocal2dzh3okzy4gscqpdt42hzrov3df6vjumalngc3g", "0x0000000000000000000000000000000000000000", "0x00000000"))
@@ -50,8 +50,8 @@ describe("DioneOracle", function () {
       .withArgs(1, BigNumber.from(0x8da5cb5b));
 
     // check if miner has received the reward
-    expect(await dioneToken.balanceOf(addr0.address))
-      .to.be.equal(ethers.constants.WeiPerEther.mul(100));
+    expect(await dioneStaking.minerStake(addr0.address))
+      .to.be.equal(ethers.constants.WeiPerEther.mul(9100));
   });
 
   it("should fail submission after request deadline", async function () {
