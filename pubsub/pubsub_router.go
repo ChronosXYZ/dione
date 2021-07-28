@@ -2,7 +2,6 @@ package pubsub
 
 import (
 	"context"
-	"time"
 
 	"github.com/fxamacker/cbor/v2"
 
@@ -40,19 +39,19 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 
 	if isBootstrap {
 		// turn off the mesh in bootstrappers -- only do gossip and PX
-		pubsub.GossipSubD = 0
-		pubsub.GossipSubDscore = 0
-		pubsub.GossipSubDlo = 0
-		pubsub.GossipSubDhi = 0
-		pubsub.GossipSubDout = 0
-		pubsub.GossipSubDlazy = 64
-		pubsub.GossipSubGossipFactor = 0.25
-		pubsub.GossipSubPruneBackoff = 5 * time.Minute
+		//pubsub.GossipSubD = 0
+		//pubsub.GossipSubDscore = 0
+		//pubsub.GossipSubDlo = 0
+		//pubsub.GossipSubDhi = 0
+		//pubsub.GossipSubDout = 0
+		//pubsub.GossipSubDlazy = 64
+		//pubsub.GossipSubGossipFactor = 0.25
+		//pubsub.GossipSubPruneBackoff = 5 * time.Minute
 		// turn on PX
-		pbOptions = append(pbOptions, pubsub.WithPeerExchange(true))
+		//pbOptions = append(pbOptions, pubsub.WithPeerExchange(true))
 	}
 
-	pb, err := pubsub.NewGossipSub(
+	pb, err := pubsub.NewFloodSub(
 		context.TODO(),
 		psr.node,
 		pbOptions...,

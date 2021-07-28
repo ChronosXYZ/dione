@@ -28,8 +28,13 @@ func ValidateGetTransaction(task *types.DioneTask) error {
 	return validation.VerifyExactMatching(task)
 }
 
+func ValidateGetBlock(task *types.DioneTask) error {
+	return validation.VerifyExactMatching(task)
+}
+
 func init() {
 	validation.RegisterValidation(rtypes.RPCTypeFilecoin, map[string]func(*types.DioneTask) error{
 		"getTransaction": ValidateGetTransaction,
+		"getBlock":       ValidateGetBlock,
 	})
 }
