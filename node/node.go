@@ -77,9 +77,6 @@ func runNode(
 			// Run blockchain sync manager
 			syncManager.Run()
 
-			// Run consensus manager
-			consensusManager.Run()
-
 			// Run dispute manager
 			disputeManager.Run(context.TODO())
 

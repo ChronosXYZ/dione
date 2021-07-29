@@ -125,21 +125,19 @@ func providePubsubRouter(lhost host.Host, config *config.Config) *pubsub.PubSubR
 
 func provideConsensusManager(
 	h host.Host,
-	cfg *config.Config,
 	bus EventBus.Bus,
 	psb *pubsub.PubSubRouter,
 	miner *blockchain.Miner,
 	bc *blockchain.BlockChain,
 	ethClient *ethclient.EthereumClient,
 	privateKey crypto.PrivKey,
-	bp *consensus.ConsensusRoundPool,
+	bp *consensus.ConsensusStatePool,
 	db *drand2.DrandBeacon,
 	mp *pool.Mempool,
 ) *consensus.PBFTConsensusManager {
 	c := consensus.NewPBFTConsensusManager(
 		bus,
 		psb,
-		cfg.ConsensusMinApprovals,
 		privateKey,
 		ethClient,
 		miner,
@@ -265,12 +263,12 @@ func provideNetworkService(bp *blockchain.BlockChain, mp *pool.Mempool) *Network
 	return ns
 }
 
-func provideBlockPool(mp *pool.Mempool, bus EventBus.Bus) *consensus.ConsensusRoundPool {
-	bp, err := consensus.NewConsensusRoundPool(mp, bus)
+func provideBlockPool(mp *pool.Mempool, bus EventBus.Bus, config *config.Config) *consensus.ConsensusStatePool {
+	bp, err := consensus.NewConsensusRoundPool(mp, bus, config.ConsensusMinApprovals)
 	if err != nil {
 		logrus.Fatalf("Failed to initialize blockpool: %s", err.Error())
 	}
-	logrus.Info("Blockpool has been successfully initialized!")
+	logrus.Info("Consensus state pool has been successfully initialized!")
 	return bp
 }
 

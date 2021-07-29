@@ -12,9 +12,9 @@ import (
 	"github.com/libp2p/go-libp2p-core/crypto"
 )
 
-func NewMessage(cmsg types2.ConsensusMessage, typ types2.ConsensusMessageType, privKey crypto.PrivKey) (*pubsub.PubSubMessage, error) {
+func NewMessage(cmsg *types2.ConsensusMessage, privKey crypto.PrivKey) (*pubsub.PubSubMessage, error) {
 	var message pubsub.PubSubMessage
-	switch typ {
+	switch cmsg.Type {
 	case types2.ConsensusMessageTypePrePrepare:
 		{
 			message.Type = pubsub.PrePrepareMessageType
@@ -36,7 +36,7 @@ func NewMessage(cmsg types2.ConsensusMessage, typ types2.ConsensusMessageType, p
 				return nil, fmt.Errorf("failed to create signature: %v", err)
 			}
 			pm := types2.PrepareMessage{
-				Blockhash: cmsg.Block.Header.Hash,
+				Blockhash: cmsg.Blockhash,
 				Signature: signature,
 			}
 			data, err := cbor.Marshal(pm)
@@ -49,14 +49,14 @@ func NewMessage(cmsg types2.ConsensusMessage, typ types2.ConsensusMessageType, p
 	case types2.ConsensusMessageTypeCommit:
 		{
 			message.Type = pubsub.CommitMessageType
-			pm := types2.CommitMessage{
-				Blockhash: cmsg.Blockhash,
-			}
 			signature, err := privKey.Sign(cmsg.Blockhash)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create signature: %v", err)
 			}
-			pm.Signature = signature
+			pm := types2.CommitMessage{
+				Blockhash: cmsg.Blockhash,
+				Signature: signature,
+			}
 			data, err := cbor.Marshal(pm)
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert message to map: %s", err.Error())

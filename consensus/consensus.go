@@ -14,8 +14,6 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 
-	"github.com/Secured-Finance/dione/cache"
-
 	"github.com/asaskevich/EventBus"
 
 	"github.com/Secured-Finance/dione/blockchain"
@@ -42,13 +40,11 @@ var (
 type PBFTConsensusManager struct {
 	bus                 EventBus.Bus
 	psb                 *pubsub.PubSubRouter
-	minApprovals        int // FIXME
 	privKey             crypto.PrivKey
-	msgLog              *ConsensusMessageLog
 	validator           *ConsensusValidator
 	ethereumClient      *ethclient.EthereumClient
 	miner               *blockchain.Miner
-	consensusRoundPool  *ConsensusRoundPool
+	consensusRoundPool  *ConsensusStatePool
 	mempool             *pool.Mempool
 	blockchain          *blockchain.BlockChain
 	address             peer.ID
@@ -58,12 +54,11 @@ type PBFTConsensusManager struct {
 func NewPBFTConsensusManager(
 	bus EventBus.Bus,
 	psb *pubsub.PubSubRouter,
-	minApprovals int,
 	privKey crypto.PrivKey,
 	ethereumClient *ethclient.EthereumClient,
 	miner *blockchain.Miner,
 	bc *blockchain.BlockChain,
-	bp *ConsensusRoundPool,
+	bp *ConsensusStatePool,
 	db *drand2.DrandBeacon,
 	mempool *pool.Mempool,
 	address peer.ID,
@@ -72,8 +67,6 @@ func NewPBFTConsensusManager(
 		psb:                 psb,
 		miner:               miner,
 		validator:           NewConsensusValidator(miner, bc, db),
-		msgLog:              NewConsensusMessageLog(),
-		minApprovals:        minApprovals,
 		privKey:             privKey,
 		ethereumClient:      ethereumClient,
 		bus:                 bus,
@@ -84,26 +77,85 @@ func NewPBFTConsensusManager(
 		stateChangeChannels: map[string]map[State][]chan bool{},
 	}
 
-	return pcm
-}
-
-func (pcm *PBFTConsensusManager) Run() {
 	pcm.psb.Hook(pubsub.PrePrepareMessageType, pcm.handlePrePrepare)
 	pcm.psb.Hook(pubsub.PrepareMessageType, pcm.handlePrepare)
 	pcm.psb.Hook(pubsub.CommitMessageType, pcm.handleCommit)
+
 	pcm.bus.SubscribeAsync("beacon:newEntry", func(entry types2.BeaconEntry) {
 		pcm.onNewBeaconEntry(entry)
 	}, true)
+
+	pcm.bus.SubscribeAsync("consensus:newState", func(block *types3.Block, newStateNumber int) {
+		newState := State(newStateNumber) // hacky, because reflection panics if we pass int to a handler which has type-alias for int
+
+		consensusMessageType := types.ConsensusMessageTypeUnknown
+
+		switch newState {
+		case StateStatusPrePrepared:
+			{
+				logrus.WithField("blockHash", fmt.Sprintf("%x", block.Header.Hash)).Debugf("Entered into PREPREPARED state")
+				if *block.Header.Proposer == pcm.address {
+					return
+				}
+				consensusMessageType = types.ConsensusMessageTypePrepare
+				break
+			}
+		case StateStatusPrepared:
+			{
+				consensusMessageType = types.ConsensusMessageTypeCommit
+				logrus.WithField("blockHash", fmt.Sprintf("%x", block.Header.Hash)).Debugf("Entered into PREPARED state")
+				break
+			}
+		case StateStatusCommited:
+			{
+				logrus.WithField("blockHash", fmt.Sprintf("%x", block.Header.Hash)).Debugf("Entered into COMMITTED state")
+				break
+			}
+		}
+
+		if consensusMessageType == types.ConsensusMessageTypeUnknown {
+			return
+		}
+
+		message, err := NewMessage(&types.ConsensusMessage{
+			Type:      consensusMessageType,
+			Blockhash: block.Header.Hash,
+		}, pcm.privKey)
+		if err != nil {
+			logrus.Errorf("Failed to create consensus message: %v", err)
+			return
+		}
+		if err = pcm.psb.BroadcastToServiceTopic(message); err != nil {
+			logrus.Errorf("Failed to send consensus message: %s", err.Error())
+			return
+		}
+	}, true)
+
+	return pcm
 }
 
 func (pcm *PBFTConsensusManager) propose(blk *types3.Block) error {
-	prePrepareMsg, err := NewMessage(types.ConsensusMessage{Block: blk}, types.ConsensusMessageTypePrePrepare, pcm.privKey)
+	cmsg := &types.ConsensusMessage{
+		Type:      StateStatusPrePrepared,
+		Block:     blk,
+		Blockhash: blk.Header.Hash,
+		From:      pcm.address,
+	}
+	prePrepareMsg, err := NewMessage(cmsg, pcm.privKey)
 	if err != nil {
 		return err
 	}
+
 	time.Sleep(1 * time.Second) // wait until all nodes will commit previous blocks
-	pcm.psb.BroadcastToServiceTopic(prePrepareMsg)
-	pcm.consensusRoundPool.AddConsensusInfo(blk)
+
+	if err = pcm.consensusRoundPool.InsertMessageIntoLog(cmsg); err != nil {
+		return err
+	}
+
+	if err = pcm.psb.BroadcastToServiceTopic(prePrepareMsg); err != nil {
+		return err
+	}
+
 	logrus.WithField("blockHash", fmt.Sprintf("%x", blk.Header.Hash)).Debugf("Entered into PREPREPARED state")
 	return nil
 }
@@ -120,48 +172,28 @@ func (pcm *PBFTConsensusManager) handlePrePrepare(message *pubsub.PubSubMessage)
 		return
 	}
 
-	cmsg := types.ConsensusMessage{
+	cmsg := &types.ConsensusMessage{
 		Type:      types.ConsensusMessageTypePrePrepare,
 		From:      message.From,
 		Block:     prePrepare.Block,
 		Blockhash: prePrepare.Block.Header.Hash,
 	}
 
-	if pcm.msgLog.Exists(cmsg) {
-		logrus.Tracef("received existing pre_prepare msg for block %x", cmsg.Block.Header.Hash)
-		return
-	}
 	if !pcm.validator.Valid(cmsg) {
-		logrus.Warnf("received invalid pre_prepare msg for block %x", cmsg.Block.Header.Hash)
+		logrus.WithField("blockHash", hex.EncodeToString(cmsg.Block.Header.Hash)).Warn("Received invalid PREPREPARE for block")
 		return
 	}
 
-	pcm.msgLog.AddMessage(cmsg)
+	err = pcm.consensusRoundPool.InsertMessageIntoLog(cmsg)
+	if err != nil {
+		logrus.WithField("err", err.Error()).Warn("Failed to add PREPARE message to log")
+		return
+	}
+
 	logrus.WithFields(logrus.Fields{
 		"blockHash": fmt.Sprintf("%x", cmsg.Block.Header.Hash),
 		"from":      message.From.String(),
 	}).Debug("Received PREPREPARE message")
-	pcm.consensusRoundPool.AddConsensusInfo(cmsg.Block)
-
-	encodedHash := hex.EncodeToString(cmsg.Blockhash)
-	if m, ok := pcm.stateChangeChannels[encodedHash]; ok {
-		if channels, ok := m[StateStatusPrePrepared]; ok {
-			for _, v := range channels {
-				v <- true
-				close(v)
-				delete(pcm.stateChangeChannels, encodedHash)
-			}
-		}
-	}
-
-	prepareMsg, err := NewMessage(cmsg, types.ConsensusMessageTypePrepare, pcm.privKey)
-	if err != nil {
-		logrus.Errorf("failed to create prepare message: %v", err)
-		return
-	}
-
-	logrus.WithField("blockHash", fmt.Sprintf("%x", prePrepare.Block.Header.Hash)).Debugf("Entered into PREPREPARED state")
-	pcm.psb.BroadcastToServiceTopic(prepareMsg)
 }
 
 func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
@@ -172,30 +204,11 @@ func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
 		return
 	}
 
-	cmsg := types.ConsensusMessage{
+	cmsg := &types.ConsensusMessage{
 		Type:      types.ConsensusMessageTypePrepare,
 		From:      message.From,
 		Blockhash: prepare.Blockhash,
 		Signature: prepare.Signature,
-	}
-
-	if _, err := pcm.consensusRoundPool.GetConsensusInfo(cmsg.Blockhash); errors.Is(err, cache.ErrNotFound) {
-		encodedHash := hex.EncodeToString(cmsg.Blockhash)
-		logrus.WithField("blockHash", encodedHash).Warn("Received PREPARE before PREPREPARED state, waiting...")
-		waitingCh := make(chan bool, 1)
-		if _, ok := pcm.stateChangeChannels[encodedHash]; !ok {
-			pcm.stateChangeChannels[encodedHash] = map[State][]chan bool{}
-		}
-		pcm.stateChangeChannels[encodedHash][StateStatusPrePrepared] = append(pcm.stateChangeChannels[encodedHash][StateStatusPrePrepared], waitingCh)
-		result := <-waitingCh
-		if !result {
-			return
-		}
-	}
-
-	if pcm.msgLog.Exists(cmsg) {
-		logrus.Tracef("received existing prepare msg for block %x", cmsg.Blockhash)
-		return
 	}
 
 	if !pcm.validator.Valid(cmsg) {
@@ -203,42 +216,16 @@ func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
 		return
 	}
 
-	pcm.msgLog.AddMessage(cmsg)
+	err = pcm.consensusRoundPool.InsertMessageIntoLog(cmsg)
+	if err != nil {
+		logrus.WithField("err", err.Error()).Warn("Failed to add PREPARE message to log")
+		return
+	}
+
 	logrus.WithFields(logrus.Fields{
 		"blockHash": fmt.Sprintf("%x", cmsg.Blockhash),
 		"from":      message.From.String(),
 	}).Debug("Received PREPARE message")
-
-	if len(pcm.msgLog.Get(types.ConsensusMessageTypePrepare, cmsg.Blockhash)) >= pcm.minApprovals-1 {
-		ci, err := pcm.consensusRoundPool.GetConsensusInfo(cmsg.Blockhash)
-		if err != nil {
-			logrus.Fatalf("This should never happen: %s", err.Error())
-		}
-		if ci.State >= StateStatusPrepared {
-			return
-		}
-
-		commitMsg, err := NewMessage(cmsg, types.ConsensusMessageTypeCommit, pcm.privKey)
-		if err != nil {
-			logrus.Errorf("failed to create commit message: %v", err)
-			return
-		}
-		pcm.psb.BroadcastToServiceTopic(commitMsg)
-		logrus.WithField("blockHash", fmt.Sprintf("%x", cmsg.Blockhash)).Debugf("Entered into PREPARED state")
-		pcm.consensusRoundPool.UpdateConsensusState(cmsg.Blockhash, StateStatusPrepared)
-
-		// pull watchers
-		encodedHash := hex.EncodeToString(cmsg.Blockhash)
-		if m, ok := pcm.stateChangeChannels[encodedHash]; ok {
-			if channels, ok := m[StateStatusPrepared]; ok {
-				for _, v := range channels {
-					v <- true
-					close(v)
-					delete(pcm.stateChangeChannels, encodedHash)
-				}
-			}
-		}
-	}
 }
 
 func (pcm *PBFTConsensusManager) handleCommit(message *pubsub.PubSubMessage) {
@@ -249,61 +236,28 @@ func (pcm *PBFTConsensusManager) handleCommit(message *pubsub.PubSubMessage) {
 		return
 	}
 
-	cmsg := types.ConsensusMessage{
+	cmsg := &types.ConsensusMessage{
 		Type:      types.ConsensusMessageTypeCommit,
 		From:      message.From,
 		Blockhash: commit.Blockhash,
 		Signature: commit.Signature,
 	}
 
-	ci, err := pcm.consensusRoundPool.GetConsensusInfo(cmsg.Blockhash)
-
-	encodedHash := hex.EncodeToString(cmsg.Blockhash)
-
-	if errors.Is(err, cache.ErrNotFound) || ci.State < StateStatusPrepared {
-		logrus.WithFields(logrus.Fields{
-			"blockHash": encodedHash,
-			"from":      cmsg.From,
-		}).Warnf("Received COMMIT message before PREPARED state, waiting...")
-		waitingCh := make(chan bool, 1)
-		if _, ok := pcm.stateChangeChannels[encodedHash]; !ok {
-			pcm.stateChangeChannels[encodedHash] = map[State][]chan bool{}
-		}
-		pcm.stateChangeChannels[encodedHash][StateStatusPrepared] = append(pcm.stateChangeChannels[encodedHash][StateStatusPrepared], waitingCh)
-		result := <-waitingCh
-		if !result {
-			return
-		}
-	}
-
-	if pcm.msgLog.Exists(cmsg) {
-		logrus.Tracef("received existing commit msg for block %x", cmsg.Blockhash)
-		return
-	}
 	if !pcm.validator.Valid(cmsg) {
 		logrus.Warnf("received invalid commit msg for block %x", cmsg.Blockhash)
 		return
 	}
 
-	pcm.msgLog.AddMessage(cmsg)
+	err = pcm.consensusRoundPool.InsertMessageIntoLog(cmsg)
+	if err != nil {
+		logrus.WithField("err", err.Error()).Warn("Failed to add COMMIT message to log")
+		return
+	}
 
 	logrus.WithFields(logrus.Fields{
 		"blockHash": fmt.Sprintf("%x", cmsg.Blockhash),
 		"from":      message.From.String(),
 	}).Debug("Received COMMIT message")
-
-	if len(pcm.msgLog.Get(types.ConsensusMessageTypeCommit, cmsg.Blockhash)) >= pcm.minApprovals {
-		ci, err := pcm.consensusRoundPool.GetConsensusInfo(cmsg.Blockhash)
-		if err != nil {
-			logrus.Fatalf("This should never happen: %s", err.Error())
-		}
-		if ci.State == StateStatusCommited {
-			return
-		}
-
-		logrus.WithField("blockHash", fmt.Sprintf("%x", cmsg.Blockhash)).Debugf("Entered into COMMIT state")
-		pcm.consensusRoundPool.UpdateConsensusState(cmsg.Blockhash, StateStatusCommited)
-	}
 }
 
 func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {

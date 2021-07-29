@@ -8,24 +8,22 @@ import (
 )
 
 type ConsensusMessageLog struct {
-	messages   mapset.Set
-	maxLogSize int
+	messages mapset.Set
 }
 
 func NewConsensusMessageLog() *ConsensusMessageLog {
 	msgLog := &ConsensusMessageLog{
-		messages:   mapset.NewSet(),
-		maxLogSize: 0, // TODO
+		messages: mapset.NewSet(),
 	}
 
 	return msgLog
 }
 
-func (ml *ConsensusMessageLog) AddMessage(msg types2.ConsensusMessage) {
-	ml.messages.Add(msg)
+func (ml *ConsensusMessageLog) AddMessage(msg *types2.ConsensusMessage) bool {
+	return ml.messages.Add(msg)
 }
 
-func (ml *ConsensusMessageLog) Exists(msg types2.ConsensusMessage) bool {
+func (ml *ConsensusMessageLog) Exists(msg *types2.ConsensusMessage) bool {
 	return ml.messages.Contains(msg)
 }
 
@@ -33,7 +31,7 @@ func (ml *ConsensusMessageLog) Get(typ types2.ConsensusMessageType, blockhash []
 	var result []*types2.ConsensusMessage
 
 	for v := range ml.messages.Iter() {
-		msg := v.(types2.ConsensusMessage)
+		msg := v.(*types2.ConsensusMessage)
 		if msg.Block != nil {
 
 		}
@@ -45,7 +43,7 @@ func (ml *ConsensusMessageLog) Get(typ types2.ConsensusMessageType, blockhash []
 				msgBlockHash = msg.Blockhash
 			}
 			if bytes.Compare(msgBlockHash, blockhash) == 0 {
-				result = append(result, &msg)
+				result = append(result, msg)
 			}
 		}
 	}
