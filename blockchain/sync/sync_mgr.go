@@ -183,6 +183,7 @@ func (sm *syncManager) doInitialMempoolSync() error {
 			txsToRetrieve = txsToRetrieve[policy.MaxTransactionCountForRetrieving:]
 		} else {
 			txHashes = txsToRetrieve
+			txsToRetrieve = nil
 		}
 
 		getMempoolTxArg := wire.GetMempoolTxsArg{
