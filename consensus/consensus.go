@@ -384,12 +384,11 @@ func (pcm *PBFTConsensusManager) commitAcceptedBlocks() (*types3.Block, error) {
 
 		if iStake.Cmp(jStake) == -1 {
 			return false
-		}
-		if iStake.Cmp(jStake) == 1 {
+		} else if iStake.Cmp(jStake) == 1 {
 			return true
+		} else {
+			return blocks[i].Block.Header.Timestamp > blocks[i].Block.Header.Timestamp
 		}
-
-		return blocks[i].Block.Header.ElectionProof.WinCount > blocks[i].Block.Header.ElectionProof.WinCount
 	})
 
 	selectedBlock = blocks[0].Block
