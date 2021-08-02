@@ -25,3 +25,5 @@ eth-contracts/node_modules
 /.dione-config-4.toml
 .bootstrap_privkey
 eth-contracts/build
+.db
+eth-contracts/secrets.json

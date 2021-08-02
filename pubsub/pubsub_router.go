@@ -2,14 +2,11 @@ package pubsub
 
 import (
 	"context"
-	"time"
 
 	"github.com/fxamacker/cbor/v2"
 
-	"github.com/Secured-Finance/dione/consensus/types"
-
-	host "github.com/libp2p/go-libp2p-core/host"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/sirupsen/logrus"
 )
@@ -20,38 +17,41 @@ type PubSubRouter struct {
 	context             context.Context
 	contextCancel       context.CancelFunc
 	serviceSubscription *pubsub.Subscription
-	handlers            map[types.MessageType][]Handler
+	handlers            map[PubSubMessageType][]Handler
 	oracleTopicName     string
 	oracleTopic         *pubsub.Topic
 }
+
+type Handler func(message *PubSubMessage)
 
 func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubRouter {
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	psr := &PubSubRouter{
-		node:          h,
-		context:       ctx,
-		contextCancel: ctxCancel,
-		handlers:      make(map[types.MessageType][]Handler),
+		node:            h,
+		context:         ctx,
+		contextCancel:   ctxCancel,
+		handlers:        make(map[PubSubMessageType][]Handler),
+		oracleTopicName: oracleTopic,
 	}
 
 	var pbOptions []pubsub.Option
 
 	if isBootstrap {
 		// turn off the mesh in bootstrappers -- only do gossip and PX
-		pubsub.GossipSubD = 0
-		pubsub.GossipSubDscore = 0
-		pubsub.GossipSubDlo = 0
-		pubsub.GossipSubDhi = 0
-		pubsub.GossipSubDout = 0
-		pubsub.GossipSubDlazy = 64
-		pubsub.GossipSubGossipFactor = 0.25
-		pubsub.GossipSubPruneBackoff = 5 * time.Minute
+		//pubsub.GossipSubD = 0
+		//pubsub.GossipSubDscore = 0
+		//pubsub.GossipSubDlo = 0
+		//pubsub.GossipSubDhi = 0
+		//pubsub.GossipSubDout = 0
+		//pubsub.GossipSubDlazy = 64
+		//pubsub.GossipSubGossipFactor = 0.25
+		//pubsub.GossipSubPruneBackoff = 5 * time.Minute
 		// turn on PX
-		pbOptions = append(pbOptions, pubsub.WithPeerExchange(true))
+		//pbOptions = append(pbOptions, pubsub.WithPeerExchange(true))
 	}
 
-	pb, err := pubsub.NewGossipSub(
+	pb, err := pubsub.NewFloodSub(
 		context.TODO(),
 		psr.node,
 		pbOptions...,
@@ -61,7 +61,6 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 		logrus.Fatalf("Error occurred when initializing PubSub subsystem: %v", err)
 	}
 
-	psr.oracleTopicName = oracleTopic
 	topic, err := pb.Join(oracleTopic)
 	if err != nil {
 		logrus.Fatalf("Error occurred when subscribing to service topic: %v", err)
@@ -72,6 +71,10 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 	psr.Pubsub = pb
 	psr.oracleTopic = topic
 
+	return psr
+}
+
+func (psr *PubSubRouter) Run() {
 	go func() {
 		for {
 			select {
@@ -79,7 +82,7 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 				return
 			default:
 				{
-					msg, err := subscription.Next(psr.context)
+					msg, err := psr.serviceSubscription.Next(psr.context)
 					if err != nil {
 						logrus.Warnf("Failed to receive pubsub message: %v", err)
 					}
@@ -88,8 +91,6 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 			}
 		}
 	}()
-
-	return psr
 }
 
 func (psr *PubSubRouter) handleMessage(p *pubsub.Message) {
@@ -102,16 +103,16 @@ func (psr *PubSubRouter) handleMessage(p *pubsub.Message) {
 	if senderPeerID == psr.node.ID() {
 		return
 	}
-	var message types.Message
+	var message PubSubMessage
 	err = cbor.Unmarshal(p.Data, &message)
 	if err != nil {
-		logrus.Warn("Unable to decode message data! " + err.Error())
+		logrus.Warn("Unable to decode pubsub message data! " + err.Error())
 		return
 	}
 	message.From = senderPeerID
 	handlers, ok := psr.handlers[message.Type]
 	if !ok {
-		logrus.Warn("Dropping message " + string(message.Type) + " because we don't have any handlers!")
+		logrus.Warnf("Dropping pubsub message with type %d because we don't have any handlers!", message.Type)
 		return
 	}
 	for _, v := range handlers {
@@ -119,7 +120,7 @@ func (psr *PubSubRouter) handleMessage(p *pubsub.Message) {
 	}
 }
 
-func (psr *PubSubRouter) Hook(messageType types.MessageType, handler Handler) {
+func (psr *PubSubRouter) Hook(messageType PubSubMessageType, handler Handler) {
 	_, ok := psr.handlers[messageType]
 	if !ok {
 		psr.handlers[messageType] = []Handler{}
@@ -127,7 +128,7 @@ func (psr *PubSubRouter) Hook(messageType types.MessageType, handler Handler) {
 	psr.handlers[messageType] = append(psr.handlers[messageType], handler)
 }
 
-func (psr *PubSubRouter) BroadcastToServiceTopic(msg *types.Message) error {
+func (psr *PubSubRouter) BroadcastToServiceTopic(msg *PubSubMessage) error {
 	data, err := cbor.Marshal(msg)
 	if err != nil {
 		return err

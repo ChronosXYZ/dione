@@ -7,12 +7,13 @@
     "test": "TS_NODE_FILES=true npx hardhat test",
     "test:reportGas": "REPORT_GAS=1 TS_NODE_FILES=true npx hardhat test",
     "coverage": "TS_NODE_FILES=true npx hardhat coverage",
-    "deploy:local": "TS_NODE_FILES=true npx hardhat --network geth run scripts/deploy.ts"
+    "deploy:local": "TS_NODE_FILES=true npx hardhat --network local run scripts/deploy.ts"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@nomiclabs/hardhat-ethers": "^2.0.2",
+    "@nomiclabs/hardhat-etherscan": "^2.1.4",
     "@nomiclabs/hardhat-waffle": "^2.0.1",
     "@types/chai": "^4.2.16",
     "@types/mocha": "^8.2.2",
