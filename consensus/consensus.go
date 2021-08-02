@@ -387,7 +387,7 @@ func (pcm *PBFTConsensusManager) commitAcceptedBlocks() (*types3.Block, error) {
 		} else if iStake.Cmp(jStake) == 1 {
 			return true
 		} else {
-			return blocks[i].Block.Header.Timestamp > blocks[i].Block.Header.Timestamp
+			return blocks[i].Block.Header.Timestamp > blocks[j].Block.Header.Timestamp
 		}
 	})
 
