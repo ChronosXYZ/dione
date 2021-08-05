@@ -1,11 +1,3 @@
 dione:
     build: .
-    working_dir: /go/src
-    ports:
-     - "5000:5000"
-    links:
-     - redisDB
-redisDB:
-    image: redis
-    ports:
-     - "6379:6379"
+    dockerfile: ./docker/Dockerfile
