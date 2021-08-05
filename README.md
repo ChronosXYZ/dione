@@ -4,10 +4,11 @@
 
 <h3 align="center">Secured Finance - A protocol for financial transactions backed by crypto-assets.</h3>
 
-[![badge](https://img.shields.io/badge/submit%20for-HackFS-blue)](https://hack.ethglobal.co/showcase/secured-finance-recTkx6c1RDoLeaQm)
+![badge](https://github.com/Secured-Finance/dione/actions/workflows/build.yml/badge.svg) [![badge](https://img.shields.io/badge/submit%20for-HackFS-blue)](https://hack.ethglobal.co/showcase/secured-finance-recTkx6c1RDoLeaQm)
 
 # Table of Contents
 
+- [Table of Contents](#table-of-contents)
 - [Introduction](#introduction)
 - [Specifications](#specifications)
   - [State validation](#state-validation)
@@ -15,7 +16,9 @@
   - [External adapters](#external-adapters)
   - [Consensus](#consensus)
 - [DIONE token](#dione-token)
-- [Contribute](#contribute)
+- [Operations diagram](#operations-diagram)
+- [Contribute <a name="contribute"> </a>](#contribute--)
+      - [Dione core contributors:](#dione-core-contributors)
 - [License](#license)
 
 
