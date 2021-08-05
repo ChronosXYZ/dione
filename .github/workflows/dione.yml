@@ -1,0 +1,17 @@
+name: Dione
+
+on:
+    push:
+        branches:
+            - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Get Commit Hash
+        id: get_commit_hash
+        run: echo ::set-output name=COMMIT_HASH::$(git rev-parse --short "$GITHUB_SHA")
+      - name: build image
+        run: docker build -f ./docker/Dockerfile -t "dione:${{ steps.get_commit_hash.outputs.COMMIT_HASH }}" .
