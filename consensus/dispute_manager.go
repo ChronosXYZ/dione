@@ -35,7 +35,6 @@ type DisputeManager struct {
 	ctx        context.Context
 	bus        EventBus.Bus
 	ethClient  *ethclient.EthereumClient
-	pcm        *PBFTConsensusManager
 	voteWindow time.Duration
 	blockchain *blockchain.BlockChain
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/asaskevich/EventBus"
+
 	"github.com/Secured-Finance/dione/blockchain"
 
 	drand2 "github.com/Secured-Finance/dione/beacon/drand"
@@ -48,7 +50,7 @@ func runNode(
 	h host.Host,
 	mp *pool.Mempool,
 	syncManager sync.SyncManager,
-	consensusManager *consensus.PBFTConsensusManager,
+	consensusManager *consensus.ConsensusHandler,
 	pubSubRouter *pubsub.PubSubRouter,
 	disputeManager *consensus.DisputeManager,
 	db *drand2.DrandBeacon,
@@ -188,28 +190,28 @@ func subscribeOnEthContractsAsync(ctx context.Context, ethClient *ethclient.Ethe
 func Start() {
 	fx.New(
 		fx.Provide(
-			provideEventBus,
 			provideAppFlags,
 			provideConfig,
+			provideCacheManager,
 			providePrivateKey,
 			provideLibp2pHost,
 			provideEthereumClient,
+			providePubsub,
 			providePubsubRouter,
 			provideBootstrapAddrs,
 			providePeerDiscovery,
-			provideDrandBeacon,
-			provideMempool,
+			drand2.NewDrandBeacon,
+			pool.NewMempool,
 			blockchain.NewMiner,
 			provideBlockChain,
-			provideBlockPool,
-			provideSyncManager,
+			sync.NewSyncManager,
 			provideNetworkRPCHost,
-			provideNetworkService,
+			NewNetworkService,
 			provideDirectRPCClient,
-			provideConsensusManager,
-			consensus.NewDisputeManager,
-			provideCacheManager,
+			func() EventBus.Bus { return EventBus.New() },
 		),
+		consensus.Module,
+
 		fx.Invoke(
 			configureLogger,
 			configureDirectRPC,

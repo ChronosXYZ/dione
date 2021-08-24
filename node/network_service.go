@@ -24,10 +24,14 @@ type NetworkService struct {
 }
 
 func NewNetworkService(bc *blockchain.BlockChain, mp *pool.Mempool) *NetworkService {
-	return &NetworkService{
+	ns := &NetworkService{
 		blockchain: bc,
 		mempool:    mp,
 	}
+
+	logrus.Info("Direct RPC has been successfully initialized!")
+
+	return ns
 }
 
 func (s *NetworkService) LastBlockHeight(ctx context.Context, arg struct{}, reply *wire.LastBlockHeightReply) error {

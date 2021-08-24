@@ -8,6 +8,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/host"
+
 	drand2 "github.com/Secured-Finance/dione/beacon/drand"
 
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -37,43 +39,43 @@ var (
 	ErrNoAcceptedBlocks = errors.New("there is no accepted blocks")
 )
 
-type PBFTConsensusManager struct {
+type ConsensusHandler struct {
 	bus                 EventBus.Bus
 	psb                 *pubsub.PubSubRouter
 	privKey             crypto.PrivKey
 	validator           *ConsensusValidator
 	ethereumClient      *ethclient.EthereumClient
 	miner               *blockchain.Miner
-	consensusRoundPool  *ConsensusStatePool
+	consensus           *ConsensusManager
 	mempool             *pool.Mempool
 	blockchain          *blockchain.BlockChain
 	address             peer.ID
 	stateChangeChannels map[string]map[State][]chan bool
 }
 
-func NewPBFTConsensusManager(
+func NewConsensusHandler(
 	bus EventBus.Bus,
 	psb *pubsub.PubSubRouter,
 	privKey crypto.PrivKey,
 	ethereumClient *ethclient.EthereumClient,
 	miner *blockchain.Miner,
 	bc *blockchain.BlockChain,
-	bp *ConsensusStatePool,
+	bp *ConsensusManager,
 	db *drand2.DrandBeacon,
 	mempool *pool.Mempool,
-	address peer.ID,
-) *PBFTConsensusManager {
-	pcm := &PBFTConsensusManager{
+	h host.Host,
+) *ConsensusHandler {
+	pcm := &ConsensusHandler{
 		psb:                 psb,
 		miner:               miner,
 		validator:           NewConsensusValidator(miner, bc, db),
 		privKey:             privKey,
 		ethereumClient:      ethereumClient,
 		bus:                 bus,
-		consensusRoundPool:  bp,
+		consensus:           bp,
 		mempool:             mempool,
 		blockchain:          bc,
-		address:             address,
+		address:             h.ID(),
 		stateChangeChannels: map[string]map[State][]chan bool{},
 	}
 
@@ -131,10 +133,12 @@ func NewPBFTConsensusManager(
 		}
 	}, true)
 
+	logrus.Info("Consensus handler has been initialized!")
+
 	return pcm
 }
 
-func (pcm *PBFTConsensusManager) propose(blk *types3.Block) error {
+func (pcm *ConsensusHandler) propose(blk *types3.Block) error {
 	cmsg := &types.ConsensusMessage{
 		Type:      StateStatusPrePrepared,
 		Block:     blk,
@@ -148,7 +152,7 @@ func (pcm *PBFTConsensusManager) propose(blk *types3.Block) error {
 
 	time.Sleep(1 * time.Second) // wait until all nodes will commit previous blocks
 
-	if err = pcm.consensusRoundPool.InsertMessageIntoLog(cmsg); err != nil {
+	if err = pcm.consensus.InsertMessageIntoLog(cmsg); err != nil {
 		return err
 	}
 
@@ -160,7 +164,7 @@ func (pcm *PBFTConsensusManager) propose(blk *types3.Block) error {
 	return nil
 }
 
-func (pcm *PBFTConsensusManager) handlePrePrepare(message *pubsub.PubSubMessage) {
+func (pcm *ConsensusHandler) handlePrePrepare(message *pubsub.PubSubMessage) {
 	var prePrepare types.PrePrepareMessage
 	err := cbor.Unmarshal(message.Payload, &prePrepare)
 	if err != nil {
@@ -184,7 +188,7 @@ func (pcm *PBFTConsensusManager) handlePrePrepare(message *pubsub.PubSubMessage)
 		return
 	}
 
-	err = pcm.consensusRoundPool.InsertMessageIntoLog(cmsg)
+	err = pcm.consensus.InsertMessageIntoLog(cmsg)
 	if err != nil {
 		logrus.WithField("err", err.Error()).Warn("Failed to add PREPARE message to log")
 		return
@@ -196,7 +200,7 @@ func (pcm *PBFTConsensusManager) handlePrePrepare(message *pubsub.PubSubMessage)
 	}).Debug("Received PREPREPARE message")
 }
 
-func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
+func (pcm *ConsensusHandler) handlePrepare(message *pubsub.PubSubMessage) {
 	var prepare types.PrepareMessage
 	err := cbor.Unmarshal(message.Payload, &prepare)
 	if err != nil {
@@ -216,7 +220,7 @@ func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
 		return
 	}
 
-	err = pcm.consensusRoundPool.InsertMessageIntoLog(cmsg)
+	err = pcm.consensus.InsertMessageIntoLog(cmsg)
 	if err != nil {
 		logrus.WithField("err", err.Error()).Warn("Failed to add PREPARE message to log")
 		return
@@ -228,7 +232,7 @@ func (pcm *PBFTConsensusManager) handlePrepare(message *pubsub.PubSubMessage) {
 	}).Debug("Received PREPARE message")
 }
 
-func (pcm *PBFTConsensusManager) handleCommit(message *pubsub.PubSubMessage) {
+func (pcm *ConsensusHandler) handleCommit(message *pubsub.PubSubMessage) {
 	var commit types.CommitMessage
 	err := cbor.Unmarshal(message.Payload, &commit)
 	if err != nil {
@@ -248,7 +252,7 @@ func (pcm *PBFTConsensusManager) handleCommit(message *pubsub.PubSubMessage) {
 		return
 	}
 
-	err = pcm.consensusRoundPool.InsertMessageIntoLog(cmsg)
+	err = pcm.consensus.InsertMessageIntoLog(cmsg)
 	if err != nil {
 		logrus.WithField("err", err.Error()).Warn("Failed to add COMMIT message to log")
 		return
@@ -260,7 +264,7 @@ func (pcm *PBFTConsensusManager) handleCommit(message *pubsub.PubSubMessage) {
 	}).Debug("Received COMMIT message")
 }
 
-func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {
+func (pcm *ConsensusHandler) onNewBeaconEntry(entry types2.BeaconEntry) {
 	block, err := pcm.commitAcceptedBlocks()
 	height, _ := pcm.blockchain.GetLatestBlockHeight()
 	if err != nil {
@@ -327,7 +331,7 @@ func (pcm *PBFTConsensusManager) onNewBeaconEntry(entry types2.BeaconEntry) {
 	}
 }
 
-func (pcm *PBFTConsensusManager) submitTasksFromBlock(block *types3.Block) {
+func (pcm *ConsensusHandler) submitTasksFromBlock(block *types3.Block) {
 	for _, tx := range block.Data {
 		var task types2.DioneTask
 		err := cbor.Unmarshal(tx.Data, &task)
@@ -362,8 +366,8 @@ func (pcm *PBFTConsensusManager) submitTasksFromBlock(block *types3.Block) {
 	}
 }
 
-func (pcm *PBFTConsensusManager) commitAcceptedBlocks() (*types3.Block, error) {
-	blocks := pcm.consensusRoundPool.GetAllBlocksWithCommit()
+func (pcm *ConsensusHandler) commitAcceptedBlocks() (*types3.Block, error) {
+	blocks := pcm.consensus.GetAllBlocksWithCommit()
 	if blocks == nil {
 		return nil, ErrNoAcceptedBlocks
 	}
@@ -409,7 +413,7 @@ func (pcm *PBFTConsensusManager) commitAcceptedBlocks() (*types3.Block, error) {
 		"height": selectedBlock.Header.Height,
 		"miner":  selectedBlock.Header.Proposer.String(),
 	}).Info("Committed new block")
-	pcm.consensusRoundPool.Prune()
+	pcm.consensus.Prune()
 	for _, v := range selectedBlock.Data {
 		err := pcm.mempool.DeleteTx(v.Hash)
 		if err != nil {

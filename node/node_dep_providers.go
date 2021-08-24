@@ -12,6 +12,7 @@ import (
 	"runtime"
 
 	"github.com/Secured-Finance/dione/cache/inmemory"
+
 	"github.com/Secured-Finance/dione/cache/redis"
 
 	types2 "github.com/Secured-Finance/dione/blockchain/types"
@@ -33,25 +34,17 @@ import (
 
 	gorpc "github.com/libp2p/go-libp2p-gorpc"
 
-	"github.com/Secured-Finance/dione/blockchain/sync"
-
-	"github.com/Secured-Finance/dione/blockchain/pool"
-
 	"github.com/Secured-Finance/dione/cache"
 	"github.com/Secured-Finance/dione/config"
-	"github.com/Secured-Finance/dione/consensus"
 	"github.com/Secured-Finance/dione/ethclient"
 	"github.com/Secured-Finance/dione/pubsub"
-	"github.com/Secured-Finance/dione/types"
-	"github.com/Secured-Finance/dione/wallet"
 	pex "github.com/Secured-Finance/go-libp2p-pex"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/discovery"
 	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/peer"
+	pubsub2 "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multiaddr"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -71,31 +64,22 @@ func provideCacheManager(cfg *config.Config) cache.CacheManager {
 	return backend
 }
 
-func provideDrandBeacon(ps *pubsub.PubSubRouter, bus EventBus.Bus) *drand2.DrandBeacon {
-	db, err := drand2.NewDrandBeacon(ps.Pubsub, bus)
-	if err != nil {
-		logrus.Fatalf("Failed to setup drand beacon: %s", err)
-	}
-	logrus.Info("DRAND beacon subsystem has been initialized!")
-	return db
-}
-
 // FIXME: do we really need this?
-func provideWallet(peerID peer.ID, privKey []byte) (*wallet.LocalWallet, error) {
-	// TODO make persistent keystore
-	kstore := wallet.NewMemKeyStore()
-	keyInfo := types.KeyInfo{
-		Type:       types.KTEd25519,
-		PrivateKey: privKey,
-	}
-
-	kstore.Put(wallet.KNamePrefix+peerID.String(), keyInfo)
-	w, err := wallet.NewWallet(kstore)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to setup wallet: %w", err)
-	}
-	return w, nil
-}
+//func provideWallet(peerID peer.ID, privKey []byte) (*wallet.LocalWallet, error) {
+//	// TODO make persistent keystore
+//	kstore := wallet.NewMemKeyStore()
+//	keyInfo := types.KeyInfo{
+//		Type:       types.KTEd25519,
+//		PrivateKey: privKey,
+//	}
+//
+//	kstore.Put(wallet.KNamePrefix+peerID.String(), keyInfo)
+//	w, err := wallet.NewWallet(kstore)
+//	if err != nil {
+//		return nil, xerrors.Errorf("failed to setup wallet: %w", err)
+//	}
+//	return w, nil
+//}
 
 func provideEthereumClient(config *config.Config) *ethclient.EthereumClient {
 	ethereum := ethclient.NewEthereumClient()
@@ -109,38 +93,17 @@ func provideEthereumClient(config *config.Config) *ethclient.EthereumClient {
 	return ethereum
 }
 
-func providePubsubRouter(lhost host.Host, config *config.Config) *pubsub.PubSubRouter {
-	psb := pubsub.NewPubSubRouter(lhost, config.PubSub.ServiceTopicName, config.IsBootstrap)
-	logrus.Info("PubSub subsystem has been initialized!")
-	return psb
+func providePubsub(h host.Host) (*pubsub2.PubSub, error) {
+	return pubsub2.NewFloodSub(
+		context.TODO(),
+		h,
+	)
 }
 
-func provideConsensusManager(
-	h host.Host,
-	bus EventBus.Bus,
-	psb *pubsub.PubSubRouter,
-	miner *blockchain.Miner,
-	bc *blockchain.BlockChain,
-	ethClient *ethclient.EthereumClient,
-	privateKey crypto.PrivKey,
-	bp *consensus.ConsensusStatePool,
-	db *drand2.DrandBeacon,
-	mp *pool.Mempool,
-) *consensus.PBFTConsensusManager {
-	c := consensus.NewPBFTConsensusManager(
-		bus,
-		psb,
-		privateKey,
-		ethClient,
-		miner,
-		bc,
-		bp,
-		db,
-		mp,
-		h.ID(),
-	)
-	logrus.Info("Consensus subsystem has been initialized!")
-	return c
+func providePubsubRouter(h host.Host, ps *pubsub2.PubSub, config *config.Config) *pubsub.PubSubRouter {
+	psb := pubsub.NewPubSubRouter(h, ps, config.PubSub.ServiceTopicName, config.IsBootstrap)
+	logrus.Info("PubSub subsystem has been initialized!")
+	return psb
 }
 
 func provideLibp2pHost(config *config.Config, privateKey crypto.PrivKey) host.Host {
@@ -210,62 +173,8 @@ func provideBlockChain(config *config.Config, bus EventBus.Bus, miner *blockchai
 	return bc
 }
 
-func provideMempool(bus EventBus.Bus) *pool.Mempool {
-	mp, err := pool.NewMempool(bus)
-	if err != nil {
-		logrus.Fatalf("Failed to initialize mempool: %s", err.Error())
-	}
-
-	logrus.Info("Mempool has been successfully initialized!")
-
-	return mp
-}
-
-func provideSyncManager(
-	bus EventBus.Bus,
-	bp *blockchain.BlockChain,
-	mp *pool.Mempool,
-	c *gorpc.Client,
-	bootstrapAddresses []multiaddr.Multiaddr,
-	psb *pubsub.PubSubRouter,
-) sync.SyncManager {
-	bootstrapPeerID := peer.ID("")
-
-	if bootstrapAddresses != nil {
-		addr, err := peer.AddrInfoFromP2pAddr(bootstrapAddresses[0]) // FIXME
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		bootstrapPeerID = addr.ID
-	}
-
-	sm := sync.NewSyncManager(bus, bp, mp, c, bootstrapPeerID, psb)
-	logrus.Info("Blockchain sync subsystem has been successfully initialized!")
-
-	return sm
-}
-
 func provideDirectRPCClient(h host.Host) *gorpc.Client {
 	return gorpc.NewClient(h, DioneProtocolID)
-}
-
-func provideNetworkService(bp *blockchain.BlockChain, mp *pool.Mempool) *NetworkService {
-	ns := NewNetworkService(bp, mp)
-	logrus.Info("Direct RPC has been successfully initialized!")
-	return ns
-}
-
-func provideBlockPool(mp *pool.Mempool, bus EventBus.Bus, config *config.Config) *consensus.ConsensusStatePool {
-	bp, err := consensus.NewConsensusRoundPool(mp, bus, config.ConsensusMinApprovals)
-	if err != nil {
-		logrus.Fatalf("Failed to initialize blockpool: %s", err.Error())
-	}
-	logrus.Info("Consensus state pool has been successfully initialized!")
-	return bp
-}
-
-func provideEventBus() EventBus.Bus {
-	return EventBus.New()
 }
 
 func provideAppFlags() *AppFlags {

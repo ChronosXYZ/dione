@@ -24,7 +24,7 @@ type PubSubRouter struct {
 
 type Handler func(message *PubSubMessage)
 
-func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubRouter {
+func NewPubSubRouter(h host.Host, ps *pubsub.PubSub, oracleTopic string, isBootstrap bool) *PubSubRouter {
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	psr := &PubSubRouter{
@@ -35,40 +35,30 @@ func NewPubSubRouter(h host.Host, oracleTopic string, isBootstrap bool) *PubSubR
 		oracleTopicName: oracleTopic,
 	}
 
-	var pbOptions []pubsub.Option
+	//var pbOptions []pubsub.Option
+	//
+	//if isBootstrap {
+	//	// turn off the mesh in bootstrappers -- only do gossip and PX
+	//	pubsub.GossipSubD = 0
+	//	pubsub.GossipSubDscore = 0
+	//	pubsub.GossipSubDlo = 0
+	//	pubsub.GossipSubDhi = 0
+	//	pubsub.GossipSubDout = 0
+	//	pubsub.GossipSubDlazy = 64
+	//	pubsub.GossipSubGossipFactor = 0.25
+	//	pubsub.GossipSubPruneBackoff = 5 * time.Minute
+	//	// turn on PX
+	//	pbOptions = append(pbOptions, pubsub.WithPeerExchange(true))
+	//}
 
-	if isBootstrap {
-		// turn off the mesh in bootstrappers -- only do gossip and PX
-		//pubsub.GossipSubD = 0
-		//pubsub.GossipSubDscore = 0
-		//pubsub.GossipSubDlo = 0
-		//pubsub.GossipSubDhi = 0
-		//pubsub.GossipSubDout = 0
-		//pubsub.GossipSubDlazy = 64
-		//pubsub.GossipSubGossipFactor = 0.25
-		//pubsub.GossipSubPruneBackoff = 5 * time.Minute
-		// turn on PX
-		//pbOptions = append(pbOptions, pubsub.WithPeerExchange(true))
-	}
-
-	pb, err := pubsub.NewFloodSub(
-		context.TODO(),
-		psr.node,
-		pbOptions...,
-	)
-
-	if err != nil {
-		logrus.Fatalf("Error occurred when initializing PubSub subsystem: %v", err)
-	}
-
-	topic, err := pb.Join(oracleTopic)
+	topic, err := ps.Join(oracleTopic)
 	if err != nil {
 		logrus.Fatalf("Error occurred when subscribing to service topic: %v", err)
 	}
 
 	subscription, err := topic.Subscribe()
 	psr.serviceSubscription = subscription
-	psr.Pubsub = pb
+	psr.Pubsub = ps
 	psr.oracleTopic = topic
 
 	return psr

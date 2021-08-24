@@ -6,9 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/asaskevich/EventBus"
-
 	"github.com/Secured-Finance/dione/beacon"
+	"github.com/asaskevich/EventBus"
 	"github.com/drand/drand/chain"
 	"github.com/drand/drand/client"
 	httpClient "github.com/drand/drand/client/http"
@@ -26,10 +25,6 @@ import (
 	"github.com/Secured-Finance/dione/lib"
 	types "github.com/Secured-Finance/dione/types"
 )
-
-var log = logrus.WithFields(logrus.Fields{
-	"subsystem": "drand",
-})
 
 type DrandBeacon struct {
 	DrandClient        client.Client
@@ -70,13 +65,11 @@ func NewDrandBeacon(ps *pubsub.PubSub, bus EventBus.Bus) (*DrandBeacon, error) {
 
 	if ps != nil {
 		opts = append(opts, libp2pClient.WithPubsub(ps))
-	} else {
-		log.Info("Initiated drand with PubSub")
 	}
 
 	drandClient, err := client.Wrap(clients, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("Couldn't create Drand clients")
+		logrus.Fatal(fmt.Errorf("cannot create drand client: %w", err))
 	}
 
 	db := &DrandBeacon{
@@ -85,6 +78,8 @@ func NewDrandBeacon(ps *pubsub.PubSub, bus EventBus.Bus) (*DrandBeacon, error) {
 		bus:         bus,
 		PublicKey:   drandChain.PublicKey,
 	}
+
+	logrus.Info("DRAND beacon subsystem has been initialized!")
 
 	return db, nil
 }
@@ -103,7 +98,7 @@ func (db *DrandBeacon) Run(ctx context.Context) error {
 func (db *DrandBeacon) getLatestDrandResult() error {
 	latestDround, err := db.DrandClient.Get(context.TODO(), 0)
 	if err != nil {
-		log.Errorf("failed to get latest drand round: %v", err)
+		logrus.Errorf("failed to get latest drand round: %v", err)
 		return err
 	}
 	db.cacheValue(newBeaconEntryFromDrandResult(latestDround))
@@ -138,12 +133,12 @@ func (db *DrandBeacon) Entry(ctx context.Context, round uint64) (types.BeaconEnt
 	}
 
 	start := lib.Clock.Now()
-	log.Infof("start fetching randomness: round %v", round)
+	logrus.Infof("start fetching randomness: round %v", round)
 	resp, err := db.DrandClient.Get(ctx, round)
 	if err != nil {
 		return types.BeaconEntry{}, fmt.Errorf("drand failed Get request: %w", err)
 	}
-	log.Infof("done fetching randomness: round %v, took %v", round, lib.Clock.Since(start))
+	logrus.Infof("done fetching randomness: round %v, took %v", round, lib.Clock.Since(start))
 	return newBeaconEntryFromDrandResult(resp), nil
 }
 func (db *DrandBeacon) cacheValue(res types.BeaconEntry) {

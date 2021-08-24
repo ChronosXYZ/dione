@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/Secured-Finance/dione/config"
+
 	types2 "github.com/Secured-Finance/dione/consensus/types"
 
 	"github.com/Secured-Finance/dione/blockchain/pool"
@@ -26,8 +28,7 @@ const (
 	StateStatusCommited
 )
 
-// ConsensusStatePool is pool for blocks that isn't not validated or committed yet
-type ConsensusStatePool struct {
+type ConsensusManager struct {
 	mempool          *pool.Mempool
 	consensusInfoMap map[string]*ConsensusInfo
 	mapMutex         sync.Mutex
@@ -35,12 +36,12 @@ type ConsensusStatePool struct {
 	minApprovals     int // FIXME
 }
 
-func NewConsensusRoundPool(mp *pool.Mempool, bus EventBus.Bus, minApprovals int) (*ConsensusStatePool, error) {
-	bp := &ConsensusStatePool{
+func NewConsensusManager(mp *pool.Mempool, bus EventBus.Bus, cfg *config.Config) (*ConsensusManager, error) {
+	bp := &ConsensusManager{
 		consensusInfoMap: map[string]*ConsensusInfo{},
 		mempool:          mp,
 		bus:              bus,
-		minApprovals:     minApprovals,
+		minApprovals:     cfg.ConsensusMinApprovals,
 	}
 
 	return bp, nil
@@ -53,7 +54,7 @@ type ConsensusInfo struct {
 	MessageLog *ConsensusMessageLog
 }
 
-func (crp *ConsensusStatePool) InsertMessageIntoLog(cmsg *types2.ConsensusMessage) error {
+func (crp *ConsensusManager) InsertMessageIntoLog(cmsg *types2.ConsensusMessage) error {
 	crp.mapMutex.Lock()
 	defer crp.mapMutex.Unlock()
 	consensusInfo, ok := crp.consensusInfoMap[hex.EncodeToString(cmsg.Blockhash)]
@@ -77,7 +78,7 @@ func (crp *ConsensusStatePool) InsertMessageIntoLog(cmsg *types2.ConsensusMessag
 	return nil
 }
 
-func (crp *ConsensusStatePool) maybeUpdateConsensusState(ci *ConsensusInfo, cmsg *types2.ConsensusMessage) {
+func (crp *ConsensusManager) maybeUpdateConsensusState(ci *ConsensusInfo, cmsg *types2.ConsensusMessage) {
 	if ci.State == StateStatusUnknown && cmsg.Type == types2.ConsensusMessageTypePrePrepare && cmsg.Block != nil {
 		ci.Block = cmsg.Block
 		logrus.WithField("hash", fmt.Sprintf("%x", cmsg.Block.Header.Hash)).Debug("New block discovered")
@@ -97,14 +98,14 @@ func (crp *ConsensusStatePool) maybeUpdateConsensusState(ci *ConsensusInfo, cmsg
 }
 
 // Prune cleans known blocks list. It is called when new consensus round starts.
-func (crp *ConsensusStatePool) Prune() {
+func (crp *ConsensusManager) Prune() {
 	for k := range crp.consensusInfoMap {
 		delete(crp.consensusInfoMap, k)
 	}
 	crp.bus.Publish("blockpool:pruned")
 }
 
-func (crp *ConsensusStatePool) GetAllBlocksWithCommit() []*ConsensusInfo {
+func (crp *ConsensusManager) GetAllBlocksWithCommit() []*ConsensusInfo {
 	crp.mapMutex.Lock()
 	defer crp.mapMutex.Unlock()
 	var consensusInfos []*ConsensusInfo

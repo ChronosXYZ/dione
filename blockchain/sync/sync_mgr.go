@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/multiformats/go-multiaddr"
+
 	"github.com/fxamacker/cbor/v2"
 
 	"github.com/asaskevich/EventBus"
@@ -54,8 +56,26 @@ type syncManager struct {
 	bus                  EventBus.Bus
 }
 
-func NewSyncManager(bus EventBus.Bus, bc *blockchain.BlockChain, mp *pool.Mempool, p2pRPCClient *gorpc.Client, bootstrapPeer peer.ID, psb *pubsub.PubSubRouter) SyncManager {
+func NewSyncManager(
+	bus EventBus.Bus,
+	bc *blockchain.BlockChain,
+	mp *pool.Mempool,
+	p2pRPCClient *gorpc.Client,
+	bootstrapAddresses []multiaddr.Multiaddr,
+	psb *pubsub.PubSubRouter,
+) SyncManager {
 	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	bootstrapPeer := peer.ID("")
+
+	if bootstrapAddresses != nil {
+		addr, err := peer.AddrInfoFromP2pAddr(bootstrapAddresses[0]) // FIXME
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		bootstrapPeer = addr.ID
+	}
+
 	sm := &syncManager{
 		bus:                  bus,
 		blockpool:            bc,
@@ -67,6 +87,8 @@ func NewSyncManager(bus EventBus.Bus, bc *blockchain.BlockChain, mp *pool.Mempoo
 		rpcClient:            p2pRPCClient,
 		psb:                  psb,
 	}
+
+	logrus.Info("Blockchain sync subsystem has been successfully initialized!")
 
 	return sm
 }
