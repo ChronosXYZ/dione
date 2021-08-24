@@ -226,7 +226,7 @@ func (c *EthereumClient) SubscribeOnNewDisputes(ctx context.Context) (chan *dion
 	return resChan, subscription, err
 }
 
-func (c *EthereumClient) SubscribeOnNewSubmittions(ctx context.Context) (chan *dioneOracle.DioneOracleSubmittedOracleRequest, event.Subscription, error) {
+func (c *EthereumClient) SubscribeOnNewSubmissions(ctx context.Context) (chan *dioneOracle.DioneOracleSubmittedOracleRequest, event.Subscription, error) {
 	resChan := make(chan *dioneOracle.DioneOracleSubmittedOracleRequest)
 	requestsFilter := c.dioneOracle.Contract.DioneOracleFilterer
 	subscription, err := requestsFilter.WatchSubmittedOracleRequest(&bind.WatchOpts{

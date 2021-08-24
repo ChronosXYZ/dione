@@ -68,17 +68,6 @@ func provideCache(config *config.Config) cache.Cache {
 	return backend
 }
 
-func provideDisputeManager(ethClient *ethclient.EthereumClient, pcm *consensus.PBFTConsensusManager, cfg *config.Config, bc *blockchain.BlockChain) *consensus.DisputeManager {
-	dm, err := consensus.NewDisputeManager(context.TODO(), ethClient, pcm, cfg.Ethereum.DisputeVoteWindow, bc)
-	if err != nil {
-		logrus.Fatal(err)
-	}
-
-	logrus.Info("Dispute subsystem has been initialized!")
-
-	return dm
-}
-
 func provideDrandBeacon(ps *pubsub.PubSubRouter, bus EventBus.Bus) *drand2.DrandBeacon {
 	db, err := drand2.NewDrandBeacon(ps.Pubsub, bus)
 	if err != nil {

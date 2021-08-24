@@ -207,7 +207,7 @@ func Start() {
 			provideNetworkService,
 			provideDirectRPCClient,
 			provideConsensusManager,
-			provideDisputeManager,
+			consensus.NewDisputeManager,
 		),
 		fx.Invoke(
 			configureLogger,
