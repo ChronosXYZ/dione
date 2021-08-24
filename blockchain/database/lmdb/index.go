@@ -1,4 +1,4 @@
-package utils
+package lmdb
 
 import (
 	"encoding/binary"

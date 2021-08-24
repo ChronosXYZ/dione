@@ -7,8 +7,11 @@ import (
 )
 
 const (
-	CacheTypeInMemory = "in-memory"
+	CacheTypeInMemory = "memory"
 	CacheTypeRedis    = "redis"
+
+	BlockchainDatabaseInMemory = "memory"
+	BlockChainDatabaseLMDB     = "lmdb"
 )
 
 type Config struct {
@@ -60,7 +63,10 @@ type RedisConfig struct {
 }
 
 type BlockchainConfig struct {
-	DatabasePath string `mapstructure:"database_path"`
+	DatabaseType string `mapstructure:"database_type"`
+	LMDB         struct {
+		DatabasePath string `mapstructure:"database_path"`
+	} `mapstructure:"lmdb"`
 }
 
 // NewConfig creates a new config based on default values or provided .env file

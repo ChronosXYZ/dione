@@ -3,12 +3,10 @@ package blockchain
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
-	"encoding/hex"
-	"errors"
 	"fmt"
-	"os"
 	"sync"
+
+	"github.com/Secured-Finance/dione/blockchain/database"
 
 	drand2 "github.com/Secured-Finance/dione/beacon/drand"
 
@@ -26,105 +24,30 @@ import (
 
 	types2 "github.com/Secured-Finance/dione/blockchain/types"
 	"github.com/fxamacker/cbor/v2"
-
-	"github.com/ledgerwatch/lmdb-go/lmdb"
-)
-
-const (
-	DefaultBlockDataPrefix   = "blockdata_"
-	DefaultBlockHeaderPrefix = "header_"
-	DefaultMetadataIndexName = "metadata"
-	LatestBlockHeightKey     = "latest_block_height"
-)
-
-var (
-	ErrBlockNotFound   = errors.New("block isn't found")
-	ErrLatestHeightNil = errors.New("latest block height is nil")
 )
 
 type BlockChain struct {
-	// db-related
-	dbEnv         *lmdb.Env
-	db            lmdb.DBI
-	metadataIndex *utils.Index
-	heightIndex   *utils.Index
-
+	db          database.Database
 	bus         EventBus.Bus
 	miner       *Miner
 	drandBeacon *drand2.DrandBeacon
 }
 
-func NewBlockChain(path string, bus EventBus.Bus, miner *Miner, db *drand2.DrandBeacon) (*BlockChain, error) {
+func NewBlockChain(db database.Database, bus EventBus.Bus, miner *Miner, drand *drand2.DrandBeacon) (*BlockChain, error) {
 	chain := &BlockChain{
+		db:          db,
 		bus:         bus,
 		miner:       miner,
-		drandBeacon: db,
+		drandBeacon: drand,
 	}
 
-	// configure lmdb env
-	env, err := lmdb.NewEnv()
-	if err != nil {
-		return nil, err
-	}
-
-	err = env.SetMaxDBs(1)
-	if err != nil {
-		return nil, err
-	}
-	err = env.SetMapSize(100 * 1024 * 1024 * 1024) // 100 GB
-	if err != nil {
-		return nil, err
-	}
-
-	err = os.MkdirAll(path, 0755)
-	if err != nil {
-		return nil, err
-	}
-
-	err = env.Open(path, 0, 0755)
-	if err != nil {
-		return nil, err
-	}
-
-	chain.dbEnv = env
-
-	var dbi lmdb.DBI
-	err = env.Update(func(txn *lmdb.Txn) error {
-		dbi, err = txn.OpenDBI("blocks", lmdb.Create)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	chain.db = dbi
-
-	// create index instances
-	metadataIndex := utils.NewIndex(DefaultMetadataIndexName, env, dbi)
-	heightIndex := utils.NewIndex("height", env, dbi)
-	chain.metadataIndex = metadataIndex
-	chain.heightIndex = heightIndex
+	logrus.Info("Blockchain has been successfully initialized!")
 
 	return chain, nil
 }
 
-func (bc *BlockChain) setLatestBlockHeight(height uint64) error {
-	err := bc.metadataIndex.PutUint64([]byte(LatestBlockHeightKey), height)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (bc *BlockChain) GetLatestBlockHeight() (uint64, error) {
-	height, err := bc.metadataIndex.GetUint64([]byte(LatestBlockHeightKey))
-	if err != nil {
-		if err == utils.ErrIndexKeyNotFound {
-			return 0, ErrLatestHeightNil
-		}
-		return 0, err
-	}
-	return height, nil
+	return bc.db.GetLatestBlockHeight()
 }
 
 func (bc *BlockChain) StoreBlock(block *types2.Block) error {
@@ -142,43 +65,18 @@ func (bc *BlockChain) StoreBlock(block *types2.Block) error {
 		}
 	}
 
-	err := bc.dbEnv.Update(func(txn *lmdb.Txn) error {
-		data, err := cbor.Marshal(block.Data)
-		if err != nil {
-			return err
-		}
-		headerData, err := cbor.Marshal(block.Header)
-		if err != nil {
-			return err
-		}
-		blockHash := hex.EncodeToString(block.Header.Hash)
-		err = txn.Put(bc.db, []byte(DefaultBlockDataPrefix+blockHash), data, 0)
-		if err != nil {
-			return err
-		}
-		err = txn.Put(bc.db, []byte(DefaultBlockHeaderPrefix+blockHash), headerData, 0) // store header separately for easy fetching
-		return err
-	})
-	if err != nil {
-		return err
-	}
-
-	// update index "height -> block hash"
-	heightBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(heightBytes, block.Header.Height)
-	err = bc.heightIndex.PutBytes(heightBytes, block.Header.Hash)
-	if err != nil {
+	if err := bc.db.StoreBlock(block); err != nil {
 		return err
 	}
 
 	// update latest block height
 	height, err := bc.GetLatestBlockHeight()
-	if err != nil && err != ErrLatestHeightNil {
+	if err != nil && err != database.ErrLatestHeightNil {
 		return err
 	}
 
-	if err == ErrLatestHeightNil || block.Header.Height > height {
-		if err = bc.setLatestBlockHeight(block.Header.Height); err != nil {
+	if err == database.ErrLatestHeightNil || block.Header.Height > height {
+		if err = bc.db.SetLatestBlockHeight(block.Header.Height); err != nil {
 			return err
 		}
 		bc.bus.Publish("blockchain:latestBlockHeightUpdated", block)
@@ -188,114 +86,27 @@ func (bc *BlockChain) StoreBlock(block *types2.Block) error {
 }
 
 func (bc *BlockChain) HasBlock(blockHash []byte) (bool, error) {
-	var blockExists bool
-	err := bc.dbEnv.View(func(txn *lmdb.Txn) error {
-		h := hex.EncodeToString(blockHash)
-		_, err := txn.Get(bc.db, []byte(DefaultBlockHeaderPrefix+h)) // try to fetch block header
-		if err != nil {
-			if lmdb.IsNotFound(err) {
-				blockExists = false
-				return nil
-			}
-			return err
-		}
-		blockExists = true
-		return nil
-	})
-	if err != nil {
-		return false, err
-	}
-	return blockExists, nil
+	return bc.db.HasBlock(blockHash)
 }
 
 func (bc *BlockChain) FetchBlockData(blockHash []byte) ([]*types2.Transaction, error) {
-	var data []*types2.Transaction
-	err := bc.dbEnv.View(func(txn *lmdb.Txn) error {
-		h := hex.EncodeToString(blockHash)
-		blockData, err := txn.Get(bc.db, []byte(DefaultBlockDataPrefix+h))
-		if err != nil {
-			if lmdb.IsNotFound(err) {
-				return ErrBlockNotFound
-			}
-			return err
-		}
-		err = cbor.Unmarshal(blockData, &data)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
+	return bc.db.FetchBlockData(blockHash)
 }
 
 func (bc *BlockChain) FetchBlockHeader(blockHash []byte) (*types2.BlockHeader, error) {
-	var blockHeader types2.BlockHeader
-	err := bc.dbEnv.View(func(txn *lmdb.Txn) error {
-		h := hex.EncodeToString(blockHash)
-		data, err := txn.Get(bc.db, []byte(DefaultBlockHeaderPrefix+h))
-		if err != nil {
-			if lmdb.IsNotFound(err) {
-				return ErrBlockNotFound
-			}
-			return err
-		}
-		err = cbor.Unmarshal(data, &blockHeader)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &blockHeader, nil
+	return bc.db.FetchBlockHeader(blockHash)
 }
 
 func (bc *BlockChain) FetchBlock(blockHash []byte) (*types2.Block, error) {
-	var block types2.Block
-	header, err := bc.FetchBlockHeader(blockHash)
-	if err != nil {
-		return nil, err
-	}
-	block.Header = header
-
-	data, err := bc.FetchBlockData(blockHash)
-	if err != nil {
-		return nil, err
-	}
-	block.Data = data
-
-	return &block, nil
+	return bc.db.FetchBlock(blockHash)
 }
 
 func (bc *BlockChain) FetchBlockByHeight(height uint64) (*types2.Block, error) {
-	var heightBytes = make([]byte, 8)
-	binary.LittleEndian.PutUint64(heightBytes, height)
-	blockHash, err := bc.heightIndex.GetBytes(heightBytes)
-	if err != nil {
-		if err == utils.ErrIndexKeyNotFound {
-			return nil, ErrBlockNotFound
-		}
-	}
-	block, err := bc.FetchBlock(blockHash)
-	if err != nil {
-		return nil, err
-	}
-	return block, nil
+	return bc.db.FetchBlockByHeight(height)
 }
 
 func (bc *BlockChain) FetchBlockHeaderByHeight(height uint64) (*types2.BlockHeader, error) {
-	var heightBytes = make([]byte, 8)
-	binary.LittleEndian.PutUint64(heightBytes, height)
-	blockHash, err := bc.heightIndex.GetBytes(heightBytes)
-	if err != nil {
-		if err == utils.ErrIndexKeyNotFound {
-			return nil, ErrBlockNotFound
-		}
-	}
-	blockHeader, err := bc.FetchBlockHeader(blockHash)
-	if err != nil {
-		return nil, err
-	}
-	return blockHeader, nil
+	return bc.db.FetchBlockHeaderByHeight(height)
 }
 
 func (bc *BlockChain) ValidateBlock(block *types2.Block) error {

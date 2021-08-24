@@ -11,6 +11,12 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/Secured-Finance/dione/blockchain/database/memory"
+
+	"github.com/Secured-Finance/dione/blockchain/database/lmdb"
+
+	"github.com/Secured-Finance/dione/blockchain/database"
+
 	"github.com/Secured-Finance/dione/cache/inmemory"
 
 	"github.com/Secured-Finance/dione/cache/redis"
@@ -24,11 +30,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/asaskevich/EventBus"
-
 	"github.com/Secured-Finance/dione/blockchain"
-
-	drand2 "github.com/Secured-Finance/dione/beacon/drand"
 
 	"github.com/libp2p/go-libp2p-core/protocol"
 
@@ -62,6 +64,29 @@ func provideCacheManager(cfg *config.Config) cache.CacheManager {
 		backend = inmemory.NewCacheManager()
 	}
 	return backend
+}
+
+func provideBlockchainDatabase(cfg *config.Config) (database.Database, error) {
+	var db database.Database
+	switch cfg.Blockchain.DatabaseType {
+	case config.BlockchainDatabaseInMemory:
+		db = memory.NewDatabase()
+	case config.BlockChainDatabaseLMDB:
+		{
+			if cfg.Blockchain.LMDB.DatabasePath == "" {
+				return nil, fmt.Errorf("database path for lmdb database is empty")
+			}
+			l, err := lmdb.NewDatabase(cfg.Blockchain.LMDB.DatabasePath)
+			if err != nil {
+				return nil, err
+			}
+			db = l
+		}
+	default:
+		db = memory.NewDatabase()
+	}
+
+	return db, nil
 }
 
 // FIXME: do we really need this?
@@ -161,16 +186,6 @@ func providePeerDiscovery(baddrs []multiaddr.Multiaddr, h host.Host) discovery.D
 	logrus.Info("Peer discovery subsystem has been initialized!")
 
 	return pexDiscovery
-}
-
-func provideBlockChain(config *config.Config, bus EventBus.Bus, miner *blockchain.Miner, db *drand2.DrandBeacon) *blockchain.BlockChain {
-	bc, err := blockchain.NewBlockChain(config.Blockchain.DatabasePath, bus, miner, db)
-	if err != nil {
-		logrus.Fatalf("Failed to initialize blockchain storage: %s", err.Error())
-	}
-	logrus.Info("Blockchain storage has been successfully initialized!")
-
-	return bc
 }
 
 func provideDirectRPCClient(h host.Host) *gorpc.Client {
@@ -303,7 +318,7 @@ func configureMiner(m *blockchain.Miner, b *blockchain.BlockChain) {
 
 func initializeBlockchain(bc *blockchain.BlockChain) {
 	_, err := bc.GetLatestBlockHeight()
-	if err == blockchain.ErrLatestHeightNil {
+	if err == database.ErrLatestHeightNil {
 		gBlock := types2.GenesisBlock()
 		err = bc.StoreBlock(gBlock) // commit genesis block
 		if err != nil {
