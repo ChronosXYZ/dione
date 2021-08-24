@@ -65,7 +65,7 @@ type Submission struct {
 	Checked   bool
 }
 
-func NewDisputeManager(bus EventBus.Bus, ethClient *ethclient.EthereumClient, bc *blockchain.BlockChain, cfg *config.Config) (*DisputeManager, error) {
+func NewDisputeManager(bus EventBus.Bus, ethClient *ethclient.EthereumClient, bc *blockchain.BlockChain, cfg *config.Config, cm cache.CacheManager) (*DisputeManager, error) {
 	ctx := context.TODO()
 
 	submissionChan, submSubscription, err := ethClient.SubscribeOnNewSubmissions(ctx)
@@ -86,10 +86,10 @@ func NewDisputeManager(bus EventBus.Bus, ethClient *ethclient.EthereumClient, bc
 		blockchain:                bc,
 		submissionChan:            submissionChan,
 		submissionEthSubscription: submSubscription,
-		submissionCache:           cache.NewInMemoryCache(), // FIXME
+		submissionCache:           cm.Cache("submissions"),
 		disputesChan:              disputesChan,
 		disputeEthSubscription:    dispSubscription,
-		disputeCache:              cache.NewInMemoryCache(), // FIXME
+		disputeCache:              cm.Cache("disputes"),
 	}
 
 	return dm, nil

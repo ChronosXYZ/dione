@@ -208,6 +208,7 @@ func Start() {
 			provideDirectRPCClient,
 			provideConsensusManager,
 			consensus.NewDisputeManager,
+			provideCacheManager,
 		),
 		fx.Invoke(
 			configureLogger,

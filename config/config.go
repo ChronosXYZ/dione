@@ -6,6 +6,11 @@ import (
 	"github.com/spf13/viper"
 )
 
+const (
+	CacheTypeInMemory = "in-memory"
+	CacheTypeRedis    = "redis"
+)
+
 type Config struct {
 	ListenPort            int              `mapstructure:"listen_port"`
 	ListenAddr            string           `mapstructure:"listen_addr"`

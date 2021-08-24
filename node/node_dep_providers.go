@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/Secured-Finance/dione/cache/inmemory"
+	"github.com/Secured-Finance/dione/cache/redis"
+
 	types2 "github.com/Secured-Finance/dione/blockchain/types"
 
 	"github.com/Secured-Finance/dione/rpc"
@@ -55,15 +58,15 @@ const (
 	DioneProtocolID = protocol.ID("/dione/1.0")
 )
 
-func provideCache(config *config.Config) cache.Cache {
-	var backend cache.Cache
-	switch config.CacheType {
-	case "in-memory":
-		backend = cache.NewInMemoryCache()
-	case "redis":
-		backend = cache.NewRedisCache(config)
+func provideCacheManager(cfg *config.Config) cache.CacheManager {
+	var backend cache.CacheManager
+	switch cfg.CacheType {
+	case config.CacheTypeInMemory:
+		backend = inmemory.NewCacheManager()
+	case config.CacheTypeRedis:
+		backend = redis.NewCacheManager(cfg)
 	default:
-		backend = cache.NewInMemoryCache()
+		backend = inmemory.NewCacheManager()
 	}
 	return backend
 }

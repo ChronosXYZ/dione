@@ -13,7 +13,7 @@ import (
 
 type Transaction struct {
 	Hash        []byte
-	MerkleProof *merkletree.Proof // sets when transaction is added to block
+	MerkleProof merkletree.Proof // sets when transaction is added to block
 	Timestamp   time.Time
 	Data        []byte
 }

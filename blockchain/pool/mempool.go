@@ -31,11 +31,13 @@ type Mempool struct {
 	bus   EventBus.Bus
 }
 
-func NewMempool(bus EventBus.Bus) (*Mempool, error) {
+func NewMempool(bus EventBus.Bus, cm cache.CacheManager) (*Mempool, error) {
 	mp := &Mempool{
-		cache: cache.NewInMemoryCache(), // here we need to use separate cache
+		cache: cm.Cache("mempool"),
 		bus:   bus,
 	}
+
+	logrus.Info("Mempool has been successfully initialized!")
 
 	return mp, nil
 }
@@ -83,9 +85,14 @@ func (mp *Mempool) GetTransactionsForNewBlock() []*types2.Transaction {
 func (mp *Mempool) GetAllTransactions() []*types2.Transaction {
 	var allTxs []*types2.Transaction
 
-	for _, v := range mp.cache.Items() {
-		tx := v.(*types2.Transaction)
-		allTxs = append(allTxs, tx)
+	for _, v := range mp.cache.Keys() {
+		var tx types2.Transaction
+		err := mp.cache.Get(v, &tx)
+		if err != nil {
+			logrus.Error(err)
+			continue
+		}
+		allTxs = append(allTxs, &tx)
 	}
 	return allTxs
 }

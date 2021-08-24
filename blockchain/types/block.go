@@ -87,7 +87,7 @@ func CreateBlock(lastBlockHeader *BlockHeader, txs []*Transaction, minerEth comm
 		if err != nil {
 			return nil, err
 		}
-		tx.MerkleProof = mp
+		tx.MerkleProof = *mp
 	}
 
 	block := &Block{
