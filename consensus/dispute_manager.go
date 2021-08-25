@@ -6,6 +6,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/Secured-Finance/dione/ethclient"
+
 	"github.com/asaskevich/EventBus"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -28,13 +30,12 @@ import (
 
 	"github.com/Secured-Finance/dione/contracts/dioneDispute"
 	"github.com/Secured-Finance/dione/contracts/dioneOracle"
-	"github.com/Secured-Finance/dione/ethclient"
 )
 
 type DisputeManager struct {
 	ctx        context.Context
 	bus        EventBus.Bus
-	ethClient  *ethclient.EthereumClient
+	ethClient  ethclient.EthereumSideAPI
 	voteWindow time.Duration
 	blockchain *blockchain.BlockChain
 
@@ -64,7 +65,7 @@ type Submission struct {
 	Checked   bool
 }
 
-func NewDisputeManager(bus EventBus.Bus, ethClient *ethclient.EthereumClient, bc *blockchain.BlockChain, cfg *config.Config, cm cache.CacheManager) (*DisputeManager, error) {
+func NewDisputeManager(bus EventBus.Bus, ethClient ethclient.EthereumSideAPI, bc *blockchain.BlockChain, cfg *config.Config, cm cache.CacheManager) (*DisputeManager, error) {
 	ctx := context.TODO()
 
 	submissionChan, submSubscription, err := ethClient.SubscribeOnNewSubmissions(ctx)

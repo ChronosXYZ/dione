@@ -32,7 +32,7 @@ var (
 type Miner struct {
 	bus               EventBus.Bus
 	address           peer.ID
-	ethClient         *ethclient.EthereumClient
+	ethClient         ethclient.EthereumSideAPI
 	minerStake        *big.Int
 	networkStake      *big.Int
 	privateKey        crypto.PrivKey
@@ -43,7 +43,7 @@ type Miner struct {
 
 func NewMiner(
 	h host.Host,
-	ethClient *ethclient.EthereumClient,
+	ethClient ethclient.EthereumSideAPI,
 	privateKey crypto.PrivKey,
 	mempool *pool.Mempool,
 	bus EventBus.Bus,

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Secured-Finance/dione/ethclient"
+
 	"github.com/libp2p/go-libp2p-core/host"
 
 	drand2 "github.com/Secured-Finance/dione/beacon/drand"
@@ -29,7 +31,6 @@ import (
 	"github.com/Secured-Finance/dione/consensus/types"
 	types2 "github.com/Secured-Finance/dione/types"
 
-	"github.com/Secured-Finance/dione/ethclient"
 	"github.com/sirupsen/logrus"
 
 	"github.com/Secured-Finance/dione/pubsub"
@@ -44,7 +45,7 @@ type ConsensusHandler struct {
 	psb                 *pubsub.PubSubRouter
 	privKey             crypto.PrivKey
 	validator           *ConsensusValidator
-	ethereumClient      *ethclient.EthereumClient
+	ethereumClient      ethclient.EthereumSideAPI
 	miner               *blockchain.Miner
 	consensus           *ConsensusManager
 	mempool             *pool.Mempool
@@ -57,7 +58,7 @@ func NewConsensusHandler(
 	bus EventBus.Bus,
 	psb *pubsub.PubSubRouter,
 	privKey crypto.PrivKey,
-	ethereumClient *ethclient.EthereumClient,
+	ethereumClient ethclient.EthereumSideAPI,
 	miner *blockchain.Miner,
 	bc *blockchain.BlockChain,
 	bp *ConsensusManager,

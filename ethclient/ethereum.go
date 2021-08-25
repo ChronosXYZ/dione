@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/sirupsen/logrus"
+
 	hdwallet "github.com/miguelmota/go-ethereum-hdwallet"
 
 	"github.com/Secured-Finance/dione/config"
@@ -21,8 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 )
 
-//	TODO: change artifacts for other contracts
-type EthereumClient struct {
+type ethereumClient struct {
 	client          *ethclient.Client
 	ethAddress      *common.Address
 	authTransactor  *bind.TransactOpts
@@ -31,51 +32,50 @@ type EthereumClient struct {
 	dioneOracle     *dioneOracle.DioneOracleSession
 }
 
-type Ethereum interface {
-	Initialize(ctx context.Context, url, connectionType, privateKey, oracleEmitterContractAddress, aggregatorContractAddress string) error
-	Balance(context.Context, string) (*big.Int, error)
-	SubmitRequestAnswer(reqID *big.Int, data string, callbackAddress common.Address, callbackMethodID [4]byte) error
+type EthereumSideAPI interface {
+	SubmitRequestAnswer(reqID *big.Int, data []byte) error
 	BeginDispute(miner common.Address, requestID *big.Int) error
-	VoteDispute(dhash string, voteStatus bool) error
-	FinishDispute(dhash string) error
+	VoteDispute(dhash [32]byte, voteStatus bool) error
+	FinishDispute(dhash [32]byte) error
+	SubscribeOnOracleEvents(ctx context.Context) (chan *dioneOracle.DioneOracleNewOracleRequest, event.Subscription, error)
 	SubscribeOnNewDisputes(ctx context.Context) (chan *dioneDispute.DioneDisputeNewDispute, event.Subscription, error)
+	SubscribeOnNewSubmissions(ctx context.Context) (chan *dioneOracle.DioneOracleSubmittedOracleRequest, event.Subscription, error)
+	GetEthAddress() *common.Address
+	GetTotalStake() (*big.Int, error)
+	GetMinerStake(minerAddress common.Address) (*big.Int, error)
 }
 
-func NewEthereumClient() *EthereumClient {
-	ethereumClient := &EthereumClient{}
+func NewEthereumClient(cfg *config.Config) (EthereumSideAPI, error) {
+	c := &ethereumClient{}
 
-	return ethereumClient
-}
-
-func (c *EthereumClient) Initialize(cfg *config.EthereumConfig) error {
-	client, err := ethclient.Dial(cfg.GatewayAddress)
+	client, err := ethclient.Dial(cfg.Ethereum.GatewayAddress)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.client = client
 
 	key, err := c.getPrivateKey(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	authTransactor, err := bind.NewKeyedTransactorWithChainID(key, big.NewInt(int64(cfg.ChainID)))
+	authTransactor, err := bind.NewKeyedTransactorWithChainID(key, big.NewInt(int64(cfg.Ethereum.ChainID)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.authTransactor = authTransactor
 	c.ethAddress = &c.authTransactor.From
 
-	stakingContract, err := dioneStaking.NewDioneStaking(common.HexToAddress(cfg.DioneStakingContractAddress), client)
+	stakingContract, err := dioneStaking.NewDioneStaking(common.HexToAddress(cfg.Ethereum.DioneStakingContractAddress), client)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	oracleContract, err := dioneOracle.NewDioneOracle(common.HexToAddress(cfg.DioneOracleContractAddress), client)
+	oracleContract, err := dioneOracle.NewDioneOracle(common.HexToAddress(cfg.Ethereum.DioneOracleContractAddress), client)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	disputeContract, err := dioneDispute.NewDioneDispute(common.HexToAddress(cfg.DisputeContractAddress), client)
+	disputeContract, err := dioneDispute.NewDioneDispute(common.HexToAddress(cfg.Ethereum.DisputeContractAddress), client)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.dioneStaking = &dioneStaking.DioneStakingSession{
 		Contract: stakingContract,
@@ -122,24 +122,27 @@ func (c *EthereumClient) Initialize(cfg *config.EthereumConfig) error {
 			Context:  context.Background(),
 		},
 	}
-	return nil
+
+	logrus.WithField("ethAddress", c.GetEthAddress().Hex()).Info("Ethereum client has been initialized!")
+
+	return c, nil
 }
 
-func (c *EthereumClient) getPrivateKey(cfg *config.EthereumConfig) (*ecdsa.PrivateKey, error) {
-	if cfg.PrivateKey != "" {
-		key, err := crypto.HexToECDSA(cfg.PrivateKey)
+func (c *ethereumClient) getPrivateKey(cfg *config.Config) (*ecdsa.PrivateKey, error) {
+	if cfg.Ethereum.PrivateKey != "" {
+		key, err := crypto.HexToECDSA(cfg.Ethereum.PrivateKey)
 		return key, err
 	}
 
-	if cfg.MnemonicPhrase != "" {
-		wallet, err := hdwallet.NewFromMnemonic(cfg.MnemonicPhrase)
+	if cfg.Ethereum.MnemonicPhrase != "" {
+		wallet, err := hdwallet.NewFromMnemonic(cfg.Ethereum.MnemonicPhrase)
 		if err != nil {
 			return nil, err
 		}
 		path := hdwallet.DefaultBaseDerivationPath
 
-		if cfg.HDDerivationPath != "" {
-			parsedPath, err := hdwallet.ParseDerivationPath(cfg.HDDerivationPath)
+		if cfg.Ethereum.HDDerivationPath != "" {
+			parsedPath, err := hdwallet.ParseDerivationPath(cfg.Ethereum.HDDerivationPath)
 			if err != nil {
 				return nil, err
 			}
@@ -160,11 +163,11 @@ func (c *EthereumClient) getPrivateKey(cfg *config.EthereumConfig) (*ecdsa.Priva
 	return nil, fmt.Errorf("private key or mnemonic phrase isn't specified")
 }
 
-func (c *EthereumClient) GetEthAddress() *common.Address {
+func (c *ethereumClient) GetEthAddress() *common.Address {
 	return c.ethAddress
 }
 
-func (c *EthereumClient) SubscribeOnOracleEvents(ctx context.Context) (chan *dioneOracle.DioneOracleNewOracleRequest, event.Subscription, error) {
+func (c *ethereumClient) SubscribeOnOracleEvents(ctx context.Context) (chan *dioneOracle.DioneOracleNewOracleRequest, event.Subscription, error) {
 	resChan := make(chan *dioneOracle.DioneOracleNewOracleRequest)
 	requestsFilter := c.dioneOracle.Contract.DioneOracleFilterer
 	subscription, err := requestsFilter.WatchNewOracleRequest(&bind.WatchOpts{
@@ -177,7 +180,7 @@ func (c *EthereumClient) SubscribeOnOracleEvents(ctx context.Context) (chan *dio
 	return resChan, subscription, err
 }
 
-func (c *EthereumClient) SubmitRequestAnswer(reqID *big.Int, data []byte) error {
+func (c *ethereumClient) SubmitRequestAnswer(reqID *big.Int, data []byte) error {
 	_, err := c.dioneOracle.SubmitOracleRequest(reqID, data)
 	if err != nil {
 		return err
@@ -186,7 +189,7 @@ func (c *EthereumClient) SubmitRequestAnswer(reqID *big.Int, data []byte) error 
 	return nil
 }
 
-func (c *EthereumClient) BeginDispute(miner common.Address, requestID *big.Int) error {
+func (c *ethereumClient) BeginDispute(miner common.Address, requestID *big.Int) error {
 	_, err := c.disputeContract.BeginDispute(miner, requestID)
 	if err != nil {
 		return err
@@ -195,7 +198,7 @@ func (c *EthereumClient) BeginDispute(miner common.Address, requestID *big.Int) 
 	return nil
 }
 
-func (c *EthereumClient) VoteDispute(dhash [32]byte, voteStatus bool) error {
+func (c *ethereumClient) VoteDispute(dhash [32]byte, voteStatus bool) error {
 	_, err := c.disputeContract.Vote(dhash, voteStatus)
 	if err != nil {
 		return err
@@ -204,7 +207,7 @@ func (c *EthereumClient) VoteDispute(dhash [32]byte, voteStatus bool) error {
 	return nil
 }
 
-func (c *EthereumClient) FinishDispute(dhash [32]byte) error {
+func (c *ethereumClient) FinishDispute(dhash [32]byte) error {
 	_, err := c.disputeContract.FinishDispute(dhash)
 	if err != nil {
 		return err
@@ -213,7 +216,7 @@ func (c *EthereumClient) FinishDispute(dhash [32]byte) error {
 	return nil
 }
 
-func (c *EthereumClient) SubscribeOnNewDisputes(ctx context.Context) (chan *dioneDispute.DioneDisputeNewDispute, event.Subscription, error) {
+func (c *ethereumClient) SubscribeOnNewDisputes(ctx context.Context) (chan *dioneDispute.DioneDisputeNewDispute, event.Subscription, error) {
 	resChan := make(chan *dioneDispute.DioneDisputeNewDispute)
 	requestsFilter := c.disputeContract.Contract.DioneDisputeFilterer
 	subscription, err := requestsFilter.WatchNewDispute(&bind.WatchOpts{
@@ -226,7 +229,7 @@ func (c *EthereumClient) SubscribeOnNewDisputes(ctx context.Context) (chan *dion
 	return resChan, subscription, err
 }
 
-func (c *EthereumClient) SubscribeOnNewSubmissions(ctx context.Context) (chan *dioneOracle.DioneOracleSubmittedOracleRequest, event.Subscription, error) {
+func (c *ethereumClient) SubscribeOnNewSubmissions(ctx context.Context) (chan *dioneOracle.DioneOracleSubmittedOracleRequest, event.Subscription, error) {
 	resChan := make(chan *dioneOracle.DioneOracleSubmittedOracleRequest)
 	requestsFilter := c.dioneOracle.Contract.DioneOracleFilterer
 	subscription, err := requestsFilter.WatchSubmittedOracleRequest(&bind.WatchOpts{

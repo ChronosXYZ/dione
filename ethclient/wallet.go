@@ -12,7 +12,7 @@ import (
 )
 
 // // Balance returns the balance of the given ethereum address.
-func (c *EthereumClient) Balance(ctx context.Context, address string) (*big.Int, error) {
+func (c *ethereumClient) Balance(ctx context.Context, address string) (*big.Int, error) {
 	ethereumAddress := common.HexToAddress(address)
 	value, err := c.client.BalanceAt(ctx, ethereumAddress, nil)
 	if err != nil {
@@ -21,7 +21,7 @@ func (c *EthereumClient) Balance(ctx context.Context, address string) (*big.Int,
 	return value, nil
 }
 
-func (c *EthereumClient) SendTransaction(ctx context.Context, private_key, to string, amount int64) string {
+func (c *ethereumClient) SendTransaction(ctx context.Context, private_key, to string, amount int64) string {
 	privateKey, err := crypto.HexToECDSA(private_key)
 	if err != nil {
 		logrus.Fatal("Failed to parse private key", err)

@@ -38,7 +38,6 @@ import (
 
 	"github.com/Secured-Finance/dione/cache"
 	"github.com/Secured-Finance/dione/config"
-	"github.com/Secured-Finance/dione/ethclient"
 	"github.com/Secured-Finance/dione/pubsub"
 	pex "github.com/Secured-Finance/go-libp2p-pex"
 	"github.com/libp2p/go-libp2p"
@@ -105,18 +104,6 @@ func provideBlockchainDatabase(cfg *config.Config) (database.Database, error) {
 //	}
 //	return w, nil
 //}
-
-func provideEthereumClient(config *config.Config) *ethclient.EthereumClient {
-	ethereum := ethclient.NewEthereumClient()
-	err := ethereum.Initialize(&config.Ethereum)
-	if err != nil {
-		logrus.Fatal(err)
-	}
-
-	logrus.WithField("ethAddress", ethereum.GetEthAddress().Hex()).Info("Ethereum client has been initialized!")
-
-	return ethereum
-}
 
 func providePubsub(h host.Host) (*pubsub2.PubSub, error) {
 	return pubsub2.NewFloodSub(

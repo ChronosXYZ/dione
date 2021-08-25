@@ -46,7 +46,7 @@ func runNode(
 	lc fx.Lifecycle,
 	cfg *config.Config,
 	disco discovery.Discovery,
-	ethClient *ethclient.EthereumClient,
+	ethClient ethclient.EthereumSideAPI,
 	h host.Host,
 	mp *pool.Mempool,
 	syncManager sync.SyncManager,
@@ -135,7 +135,7 @@ func runLibp2pAsync(ctx context.Context, h host.Host, cfg *config.Config, disco 
 	return nil
 }
 
-func subscribeOnEthContractsAsync(ctx context.Context, ethClient *ethclient.EthereumClient, mp *pool.Mempool) error {
+func subscribeOnEthContractsAsync(ctx context.Context, ethClient ethclient.EthereumSideAPI, mp *pool.Mempool) error {
 	eventChan, subscription, err := ethClient.SubscribeOnOracleEvents(ctx)
 	if err != nil {
 		return err
@@ -195,7 +195,7 @@ func Start() {
 			provideCacheManager,
 			providePrivateKey,
 			provideLibp2pHost,
-			provideEthereumClient,
+			ethclient.NewEthereumClient,
 			providePubsub,
 			providePubsubRouter,
 			provideBootstrapAddrs,
