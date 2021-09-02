@@ -41,17 +41,16 @@ var (
 )
 
 type ConsensusHandler struct {
-	bus                 EventBus.Bus
-	psb                 *pubsub.PubSubRouter
-	privKey             crypto.PrivKey
-	validator           *ConsensusValidator
-	ethereumClient      ethclient.EthereumSideAPI
-	miner               *blockchain.Miner
-	consensus           *ConsensusManager
-	mempool             *pool.Mempool
-	blockchain          *blockchain.BlockChain
-	address             peer.ID
-	stateChangeChannels map[string]map[State][]chan bool
+	bus            EventBus.Bus
+	psb            *pubsub.PubSubRouter
+	privKey        crypto.PrivKey
+	validator      *ConsensusValidator
+	ethereumClient ethclient.EthereumSideAPI
+	miner          *blockchain.Miner
+	consensus      *ConsensusManager
+	mempool        *pool.Mempool
+	blockchain     *blockchain.BlockChain
+	address        peer.ID
 }
 
 func NewConsensusHandler(
@@ -67,17 +66,16 @@ func NewConsensusHandler(
 	h host.Host,
 ) *ConsensusHandler {
 	pcm := &ConsensusHandler{
-		psb:                 psb,
-		miner:               miner,
-		validator:           NewConsensusValidator(miner, bc, db),
-		privKey:             privKey,
-		ethereumClient:      ethereumClient,
-		bus:                 bus,
-		consensus:           bp,
-		mempool:             mempool,
-		blockchain:          bc,
-		address:             h.ID(),
-		stateChangeChannels: map[string]map[State][]chan bool{},
+		psb:            psb,
+		miner:          miner,
+		validator:      NewConsensusValidator(miner, bc, db),
+		privKey:        privKey,
+		ethereumClient: ethereumClient,
+		bus:            bus,
+		consensus:      bp,
+		mempool:        mempool,
+		blockchain:     bc,
+		address:        h.ID(),
 	}
 
 	pcm.psb.Hook(pubsub.PrePrepareMessageType, pcm.handlePrePrepare)
@@ -299,17 +297,6 @@ func (pcm *ConsensusHandler) onNewBeaconEntry(entry types2.BeaconEntry) {
 		if block.Header.Proposer.String() == pcm.address.String() {
 			pcm.submitTasksFromBlock(block)
 		}
-	}
-
-	for k, v := range pcm.stateChangeChannels {
-		for k1, j := range v {
-			for _, ch := range j {
-				ch <- true
-				close(ch)
-			}
-			delete(v, k1)
-		}
-		delete(pcm.stateChangeChannels, k)
 	}
 
 	minedBlock, err := pcm.miner.MineBlock(entry.Data, entry.Round)

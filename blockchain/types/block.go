@@ -54,6 +54,8 @@ func CreateBlock(lastBlockHeader *BlockHeader, txs []*Transaction, minerEth comm
 		merkleHashes = append(merkleHashes, tx.Hash)
 	}
 	merkleHashes = append(merkleHashes, lastBlockHeader.Hash)
+
+	// we use timestamp as salt for block hash, because salt doesn't work in this merkle tree library for some reason
 	timestampBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(timestampBytes, uint64(timestamp))
 	merkleHashes = append(merkleHashes, timestampBytes)

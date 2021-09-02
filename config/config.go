@@ -1,8 +1,6 @@
 package config
 
 import (
-	"fmt"
-
 	"github.com/spf13/viper"
 )
 
@@ -23,7 +21,6 @@ type Config struct {
 	Ethereum              EthereumConfig   `mapstructure:"ethereum"`
 	Filecoin              FilecoinConfig   `mapstructure:"filecoin"`
 	PubSub                PubSubConfig     `mapstructure:"pubsub"`
-	Store                 StoreConfig      `mapstructure:"store"`
 	ConsensusMinApprovals int              `mapstructure:"consensus_min_approvals"`
 	Redis                 RedisConfig      `mapstructure:"redis"`
 	CacheType             string           `mapstructure:"cache_type"`
@@ -51,11 +48,6 @@ type FilecoinConfig struct {
 type PubSubConfig struct {
 	ServiceTopicName string `mapstructure:"service_topic_name"`
 }
-
-type StoreConfig struct {
-	DatabaseURL string `mapstructure:"database_url"`
-}
-
 type RedisConfig struct {
 	Addr     string `mapstructure:"redis_addr"`
 	Password string `mapstructure:"redis_password"`
@@ -71,11 +63,6 @@ type BlockchainConfig struct {
 
 // NewConfig creates a new config based on default values or provided .env file
 func NewConfig(configPath string) (*Config, error) {
-	dbName := "dione"
-	username := "user"
-	password := "password"
-	dbURL := fmt.Sprintf("host=localhost user=%s password=%s dbname=%s sslmode=disable", username, password, dbName)
-
 	cfg := &Config{
 		ListenAddr:     "localhost",
 		ListenPort:     8000,
@@ -87,15 +74,12 @@ func NewConfig(configPath string) (*Config, error) {
 		PubSub: PubSubConfig{
 			ServiceTopicName: "dione",
 		},
-		Store: StoreConfig{
-			DatabaseURL: dbURL,
-		},
 		Redis: RedisConfig{
-			Addr:     "redisDB:6379",
+			Addr:     "localhost:6379",
 			Password: "",
 			DB:       0,
 		},
-		CacheType: "in-memory",
+		CacheType: "memory",
 	}
 
 	viper.SetConfigFile(configPath)

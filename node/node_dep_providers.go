@@ -193,7 +193,6 @@ func provideAppFlags() *AppFlags {
 func provideConfig(flags *AppFlags) *config.Config {
 	if flags.ConfigPath == "" {
 		logrus.Fatal("no config path provided")
-
 	}
 
 	cfg, err := config.NewConfig(flags.ConfigPath)
@@ -252,7 +251,7 @@ func providePrivateKey(cfg *config.Config) crypto.PrivKey {
 
 func generatePrivateKey() (crypto.PrivKey, error) {
 	r := rand.Reader
-	// Creates a new RSA key pair for this host.
+	// Creates a new Ed25519 key pair for this host.
 	prvKey, _, err := crypto.GenerateKeyPairWithReader(crypto.Ed25519, 2048, r)
 	if err != nil {
 		return nil, err
